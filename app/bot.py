@@ -3,6 +3,7 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.storage.redis import RedisStorage
 
+from app.bb import entry as bb_entry  # BlackBird
 from app.config import settings
 from app.handlers import (
     balance,
@@ -185,6 +186,7 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     dp.message.middleware(SubscriptionStatusMiddleware())
     dp.callback_query.middleware(SubscriptionStatusMiddleware())
     dp.pre_checkout_query.middleware(SubscriptionStatusMiddleware())
+    bb_entry.register_handlers(dp)  # BlackBird: кнопки над строкой ввода, раньше остальных текстовых хендлеров
     start.register_handlers(dp)
     menu.register_handlers(dp)
     subscription.register_handlers(dp)

@@ -68,6 +68,7 @@
 
 ### .github/workflows
 
+- `.github/workflows/blackbird-image.yml` — файл
 - `.github/workflows/codeql.yml` — файл
 - `.github/workflows/docker-hub.yml` — файл
 - `.github/workflows/docker-registry.yml` — файл
@@ -81,6 +82,7 @@
 
 ## app
 
+- `app/bb/`
 - `app/bot.py` — Python-модуль
   Классы: нет
   Функции: `debug_callback_handler`, `setup_bot`, `shutdown_bot`
@@ -115,6 +117,21 @@
 - `app/utils/`
 - `app/webapi/`
 - `app/webserver/`
+
+### app/bb
+
+- `app/bb/__init__.py` — Python-модуль
+  Классы: нет
+  Функции: нет
+- `app/bb/entry.py` — Python-модуль
+  Классы: нет
+  Функции: `bb_reply_keyboard`, `send_bb_keyboard` — Короткое сообщение с клавиатурой и сброс кнопки слева для чата. Ошибки только в лог., `maybe_send_bb_keyboard`, `on_bot_button`, `on_cabinet_button`, `register_handlers`
+- `app/bb/rollout.py` — Python-модуль
+  Классы: нет
+  Функции: `chat_menu_enabled` — off (и любое неизвестное значение) -> False; admins -> только админы; all -> все.
+- `app/bb/texts.py` — Python-модуль
+  Классы: нет
+  Функции: `bb_text`
 
 ### app/cabinet
 
@@ -3168,6 +3185,7 @@
 - `tests/_manual_grace_core_runner.py` — Python-модуль
   Классы: нет
   Функции: нет
+- `tests/bb/`
 - `tests/cabinet/`
 - `tests/ci/`
 - `tests/conftest.py` — Python-модуль
@@ -3322,6 +3340,18 @@
 - `tests/utils/`
 - `tests/webapi/`
 - `tests/webserver/`
+
+### tests/bb
+
+- `tests/bb/__init__.py` — Python-модуль
+  Классы: нет
+  Функции: нет
+- `tests/bb/test_entry.py` — Python-модуль
+  Классы: нет
+  Функции: `test_rollout_off_admins_all`, `test_reply_keyboard_layout`, `enabled`, `test_bot_button_clears_state_and_shows_menu`, `test_cabinet_button_sends_webapp_button`, `test_buttons_ignored_when_disabled`, `test_send_bb_keyboard_never_raises`
+- `tests/bb/test_smoke.py` — Python-модуль
+  Классы: нет
+  Функции: `test_bb_package_imports`
 
 ### tests/cabinet
 
