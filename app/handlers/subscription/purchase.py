@@ -9,6 +9,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InaccessibleMessage, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb.rollout import chat_menu_enabled  # BlackBird
 from app.config import settings
 from app.database.crud.subscription import (
     apply_trial_conversion_defaults,
@@ -1114,6 +1115,12 @@ async def activate_trial(callback: types.CallbackQuery, db_user: User, db: Async
 
         subscription_link = get_display_subscription_link(subscription)
         hide_subscription_link = settings.should_hide_subscription_link()
+
+        # BlackBird: в меню-переписке после пробного сразу экран подключения
+        if remnawave_user and subscription_link and chat_menu_enabled(db_user):
+            await handle_connect_subscription(callback, db_user, db)
+            logger.info('✅ Активирована тестовая подписка для пользователя', telegram_id=db_user.telegram_id)
+            return
 
         payment_note = ''
         if charged_amount > 0:

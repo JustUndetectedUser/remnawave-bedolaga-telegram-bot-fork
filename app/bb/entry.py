@@ -14,6 +14,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb import tariffs as bb_tariffs
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import TEXTS, bb_text
 from app.config import settings
@@ -99,5 +100,7 @@ async def on_cabinet_button(message: types.Message, db_user=None) -> None:
 
 
 def register_handlers(dp: Dispatcher) -> None:
+    """Все хендлеры app.bb (bot.py зовёт только эту функцию)."""
     dp.message.register(on_bot_button, F.text.in_({BB_BTN_BOT, BB_BTN_BOT_EN}))
     dp.message.register(on_cabinet_button, F.text.in_({BB_BTN_CABINET, BB_BTN_CABINET_EN}))
+    bb_tariffs.register_handlers(dp)

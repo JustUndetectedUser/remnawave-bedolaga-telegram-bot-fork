@@ -40,6 +40,8 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb.main_menu import bb_edit_main_menu, bb_send_main_menu  # BlackBird
+from app.bb.rollout import chat_menu_enabled  # BlackBird
 from app.config import settings
 from app.database.crud.subscription import get_all_subscriptions_by_user_id
 from app.database.crud.tariff import get_tariff_by_id
@@ -750,6 +752,9 @@ async def try_send_rich_main_menu(
     keyboard: InlineKeyboardMarkup,
 ) -> bool:
     """Отправляет главное меню rich-сообщением. False — показать классическое меню."""
+    # BlackBird: меню в переписке вместо rich-меню и классики (/start, регистрация, «Вызвать бота»)
+    if chat_menu_enabled(db_user):
+        return await bb_send_main_menu(bot, chat_id, db_user, db)
     if not is_rich_menu_enabled():
         return False
 
@@ -812,6 +817,9 @@ async def try_edit_rich_main_menu(
     keyboard: InlineKeyboardMarkup,
 ) -> bool:
     """Rich-аналог edit_or_answer_photo для callback-навигации. False — рисовать классику."""
+    # BlackBird: меню в переписке вместо rich-меню и классики (show_main_menu, back_to_menu)
+    if chat_menu_enabled(db_user):
+        return await bb_edit_main_menu(callback, db_user, db)
     if not is_rich_menu_enabled():
         return False
 
