@@ -7,7 +7,13 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bb import connect as bb_connect, more as bb_more, renew as bb_renew, tariffs as bb_tariffs
+from app.bb import (
+    connect as bb_connect,
+    main_menu as bb_menu,
+    more as bb_more,
+    renew as bb_renew,
+    tariffs as bb_tariffs,
+)
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import TEXTS, bb_text
 from app.config import settings
@@ -73,3 +79,4 @@ def register_handlers(dp: Dispatcher) -> None:
     bb_renew.register_handlers(dp)
     bb_connect.register_handlers(dp)
     bb_more.register_handlers(dp)
+    bb_menu.register_handlers(dp)

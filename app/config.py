@@ -1227,6 +1227,7 @@ class Settings(BaseSettings):
     BB_HAPP_REDIRECT_URL: str = ''  # BlackBird: https://<кабинет>/guest/happ, страница открывает happ://add/<ссылка>
     BB_HAPP_LINK_TV: str = ''  # BlackBird: Happ для телевизора
     BB_HAPP_LINK_APK: str = ''  # BlackBird: Happ APK
+    BB_OFFERS_URL: str = ''  # BlackBird: http://guest-key:8091/invite/offers, тарифы промогрупп; пусто: выключено
     # Rich-меню (Bot API 10.1): заголовки, таблица подписок, details-блоки, tg-time.
     # Требует telegram-bot-api с Bot API 10.1+; при недоступности бот сам откатывается
     # на классический рендер до рестарта. В rich-режиме главное меню идёт без логотипа.

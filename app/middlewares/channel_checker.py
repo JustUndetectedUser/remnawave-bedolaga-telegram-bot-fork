@@ -9,6 +9,7 @@ from aiogram.exceptions import TelegramAPIError, TelegramBadRequest, TelegramFor
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, TelegramObject, Update
 
+from app.bb import offers as bb_offers  # BlackBird
 from app.config import settings
 from app.database.crud.campaign import get_campaign_by_start_parameter
 from app.database.crud.subscription import deactivate_subscription, reactivate_subscription
@@ -315,6 +316,9 @@ class ChannelCheckerMiddleware(BaseMiddleware):
             return
 
         payload = parts[1]
+        # BlackBird: offer_<код> не payload Bedolaga (иначе после проверки он станет реферальным кодом): код в Redis
+        if await bb_offers.stash_start_payload(telegram_id, payload):
+            return
 
         # Save to FSM state
         if state:

@@ -17,6 +17,10 @@ TEXTS = {
         'btn_more': 'Ещё',
         'btn_trial': '🎁 Попробовать Pro бесплатно',
         'btn_tariffs': 'Платные тарифы',
+        # Уникальный тариф промогруппы (app/bb/offers.py)
+        'btn_offer': '🎁 Вам доступен уникальный тариф',
+        'offer_pending': '⏳ Заявка на рассмотрении',
+        'offer_gone': 'Предложение больше не доступно',
         'menu_status': 'Подписка {tariff} до {date} · Баланс {balance}',
         'menu_status_trial': 'Пробный {tariff} до {date} · Баланс {balance}',
         'menu_status_expired': 'Подписка {tariff} закончилась {date} · Баланс {balance}',
@@ -101,6 +105,10 @@ TEXTS = {
         'btn_more': 'More',
         'btn_trial': '🎁 Try Pro for free',
         'btn_tariffs': 'Paid plans',
+        # Promo group special plan (app/bb/offers.py)
+        'btn_offer': '🎁 A special plan is available to you',
+        'offer_pending': '⏳ Request under review',
+        'offer_gone': 'This offer is no longer available',
         'menu_status': '{tariff} subscription until {date} · Balance {balance}',
         'menu_status_trial': '{tariff} trial until {date} · Balance {balance}',
         'menu_status_expired': '{tariff} subscription ended on {date} · Balance {balance}',

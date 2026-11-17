@@ -2,13 +2,17 @@
 
 Рисуется вместо rich-меню и классического меню Bedolaga на всех путях показа главного меню:
 хуки в app/utils/rich_menu.py (try_send_rich_main_menu и try_edit_rich_main_menu).
+
+Уникальный тариф промогруппы (app/bb/offers.py): первой строкой кнопка или «Заявка на рассмотрении», над строкой
+статуса название группы. Нажатие обрабатывается здесь же: offers.py не тянет меню, иначе кольцо импортов.
 """
 
 import html
+from collections.abc import Sequence
 from datetime import date, datetime
 
 import structlog
-from aiogram import Bot
+from aiogram import Bot, Dispatcher, F
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.types import (
     CallbackQuery,
@@ -19,6 +23,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb import offers as bb_offers
 from app.bb.keyboard import maybe_send_bb_keyboard, maybe_send_bb_keyboard_once
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import bb_count, bb_text
@@ -112,6 +117,34 @@ def _first_visit(user, language: str, trial_days: int | None, trial_devices: int
     return f'{welcome}\n\n{legal}', _keyboard(language, (TRIAL,), (TARIFFS,))
 
 
+def _with_offers(
+    text: str, keyboard: InlineKeyboardMarkup, offers: Sequence[dict], language: str
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Предложения промогрупп первыми строками, их названия над текстом меню. Текст сервера экранируется."""
+    blocks, rows = [], []
+    for offer in offers:
+        title = html.escape(offer.get('title') or '')
+        if offer.get('state') == 'open':
+            body = html.escape(offer.get('text') or '')
+            blocks.append('\n'.join(part for part in (f'<b>{title}</b>' if title else '', body) if part))
+            button = InlineKeyboardButton(
+                text=bb_text(language, 'btn_offer'), callback_data=bb_offers.offer_callback(offer['id'])
+            )
+        elif offer.get('state') == 'pending':
+            blocks.append(f'<b>{title}</b>' if title else '')
+            button = InlineKeyboardButton(
+                text=bb_text(language, 'offer_pending'), callback_data=bb_offers.WAIT_CALLBACK
+            )
+        else:
+            continue
+        rows.append([button])
+    if not rows:
+        return text, keyboard
+    head = '\n\n'.join(block for block in blocks if block)
+    markup = InlineKeyboardMarkup(inline_keyboard=rows + keyboard.inline_keyboard)
+    return (f'{head}\n\n{text}' if head else text), markup
+
+
 def bb_main_menu(
     user,
     subscription,
@@ -120,8 +153,17 @@ def bb_main_menu(
     tariff=None,
     trial_days: int | None = None,
     trial_devices: int | None = None,
+    offers: Sequence[dict] = (),
 ) -> tuple[str, InlineKeyboardMarkup]:
-    """Текст (HTML) и кнопки главного меню. tariff: тариф подписки, если уже загружен отдельно."""
+    """Текст (HTML) и кнопки главного меню. tariff: тариф подписки, если уже загружен отдельно.
+
+    offers: предложения промогрупп (app/bb/offers.py), в любом состоянии подписки первыми строками.
+    """
+    text, keyboard = _menu(user, subscription, language, tariff, trial_days, trial_devices)
+    return _with_offers(text, keyboard, offers, language)
+
+
+def _menu(user, subscription, language: str, tariff, trial_days, trial_devices) -> tuple[str, InlineKeyboardMarkup]:
     if subscription is None:
         return _first_visit(user, language, trial_days, trial_devices)
 
@@ -196,8 +238,15 @@ async def build_bb_main_menu(db_user, db: AsyncSession) -> tuple[str, InlineKeyb
         tariff = await get_tariff_by_id(db, subscription.tariff_id, with_promo_groups=False)
     if subscription is None and trial_available(db_user):
         trial_days, trial_devices = await trial_numbers(db)
+    offers = await bb_offers.fetch_offers(db_user) if chat_menu_enabled(db_user) else []
     return bb_main_menu(
-        db_user, subscription, language, tariff=tariff, trial_days=trial_days, trial_devices=trial_devices
+        db_user,
+        subscription,
+        language,
+        tariff=tariff,
+        trial_days=trial_days,
+        trial_devices=trial_devices,
+        offers=offers,
     )
 
 
@@ -287,3 +336,40 @@ async def bb_edit_main_menu(callback: CallbackQuery, db_user, db: AsyncSession) 
     except Exception:
         logger.exception('BlackBird: не удалось показать меню', chat_id=chat_id)
         return False
+
+
+async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
+    """«Вам доступен уникальный тариф»: то же, что вход на странице ссылки (заявка или сразу в группе), затем меню.
+
+    Сообщения админам и приветствие группы шлёт guest-key; здесь только короткий ответ на нажатие.
+    """
+    if not chat_menu_enabled(db_user):
+        await callback.answer()
+        return
+    language = getattr(db_user, 'language', None) or 'ru'
+    wanted = (callback.data or '').removeprefix(bb_offers.CALLBACK_PREFIX)
+    offers = await bb_offers.fetch_offers(db_user, fresh=True)
+    offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
+    if offer is None:
+        await callback.answer(bb_text(language, 'offer_gone'))
+    elif offer['state'] == 'pending':
+        await callback.answer(bb_text(language, 'offer_pending'))
+    else:
+        state = await bb_offers.claim_offer(db_user, offer['id'])
+        if state is None:
+            await callback.answer(bb_text(language, 'offer_gone'))
+        elif state == 'pending':
+            await callback.answer(bb_text(language, 'offer_pending'))
+        else:
+            await callback.answer()
+    await bb_edit_main_menu(callback, db_user, db)
+
+
+async def on_offer_wait(callback: CallbackQuery, db_user=None) -> None:
+    """«Заявка на рассмотрении»: только ответ, решение придёт сообщением бота."""
+    await callback.answer(bb_text(getattr(db_user, 'language', None), 'offer_pending'))
+
+
+def register_handlers(dp: Dispatcher) -> None:
+    dp.callback_query.register(on_offer, F.data.startswith(bb_offers.CALLBACK_PREFIX))
+    dp.callback_query.register(on_offer_wait, F.data == bb_offers.WAIT_CALLBACK)
