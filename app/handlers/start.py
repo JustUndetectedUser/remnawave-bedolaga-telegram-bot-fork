@@ -1541,7 +1541,7 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     if user and user.status != UserStatus.DELETED.value:
         logger.info('✅ Активный пользователь найден', telegram_id=user.telegram_id)
         # BlackBird: /start offer_<код> у зарегистрированного: записать предложение сразу, дальше обычный путь
-        await bb_offers.after_start(user)
+        await bb_offers.after_start(user, message.bot)
 
         # Check for phantom user created by guest landing purchase and merge
         if message.from_user.username:
@@ -2338,7 +2338,8 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, existing_user, pinned_message)
-            await bb_offers.after_start(existing_user)  # BlackBird: offer_<код>, регистрация закончилась раньше
+            # BlackBird: offer_<код>, регистрация закончилась раньше
+            await bb_offers.after_start(existing_user, callback.bot)
             # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
             await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(callback.message, existing_user, texts, db, keyboard):
@@ -2548,7 +2549,7 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
 
     await state.clear()
     # BlackBird: регистрация закончена: предложение по /start offer_<код> (до приветствия или меню, оба пути)
-    await bb_offers.after_start(user)
+    await bb_offers.after_start(user, callback.bot)
 
     if campaign_message:
         try:
@@ -2703,7 +2704,8 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, existing_user, pinned_message)
-            await bb_offers.after_start(existing_user)  # BlackBird: offer_<код>, регистрация закончилась раньше
+            # BlackBird: offer_<код>, регистрация закончилась раньше
+            await bb_offers.after_start(existing_user, message.bot)
             # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
             await maybe_send_bb_keyboard(message.bot, message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(message, existing_user, texts, db, keyboard):
@@ -2942,7 +2944,7 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
 
     await state.clear()
     # BlackBird: регистрация закончена: предложение по /start offer_<код> (до приветствия или меню, оба пути)
-    await bb_offers.after_start(user)
+    await bb_offers.after_start(user, message.bot)
 
     if campaign_message:
         try:
@@ -3280,7 +3282,8 @@ async def required_sub_channel_check(
             logger.info('🗑️ CHANNEL CHECK: Redis payload удален после успешной проверки подписки')
 
         if user and user.status != UserStatus.DELETED.value:
-            await bb_offers.after_start(user)  # BlackBird: offer_<код>, задержанный проверкой подписки на канал
+            # BlackBird: offer_<код>, задержанный проверкой подписки на канал
+            await bb_offers.after_start(user, query.bot)
             # Uses primary subscription (multi-tariff compatible via property)
             has_active_subscription, subscription_is_active = _calculate_subscription_flags(user.subscription)
 

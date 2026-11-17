@@ -222,7 +222,7 @@ def test_texts_have_no_em_dash():
     from app.bb.texts import TEXTS
 
     for language in ('ru', 'en'):
-        for key in ('btn_offer', 'offer_pending', 'offer_gone', 'offer_retry'):
+        for key in ('btn_offer', 'offer_pending', 'offer_gone', 'offer_retry', 'offer_taken', 'offer_dead'):
             assert '—' not in TEXTS[language][key]
 
 
@@ -337,6 +337,23 @@ async def test_claim_failure_says_try_again_and_keeps_button(env, monkeypatch):
     callback = _menu_callback(offers.offer_callback(OFFER_ID))
     await main_menu.on_offer(callback, _user(language='en', subscription=None), MagicMock())
     callback.answer.assert_awaited_once_with('Something went wrong, please try again')
+
+
+async def test_late_answer_failure_still_rerenders_menu(env, monkeypatch):
+    """Нажатие шло долго (до CLAIM_TIMEOUT), Telegram уже не принимает ответ («query is too old»): ошибка ответа
+    в лог, меню всё равно перерисовано."""
+    monkeypatch.setattr(main_menu, 'maybe_send_bb_keyboard_once', AsyncMock())
+    user = _user(subscription=None)
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.offers = [dict(OPEN)]
+        callback = _menu_callback(offers.offer_callback(OFFER_ID))
+        callback.answer.side_effect = RuntimeError('Bad Request: query is too old and response timeout expired')
+        await main_menu.on_offer(callback, user, MagicMock())
+        assert len(server.calls('POST', '/invite/offers/claim')) == 1
+        callback.answer.assert_awaited_once_with('⏳ Заявка на рассмотрении')
+        kwargs = callback.bot.edit_message_text.await_args.kwargs
+        assert _callbacks(kwargs['reply_markup'])[0] == ['bb_offer_wait']
 
 
 async def test_click_when_guest_key_unreachable_keeps_cached_offer(env, monkeypatch):
@@ -583,6 +600,83 @@ async def test_code_waits_again_when_guest_key_does_not_answer(env, monkeypatch)
         assert env.data == {}
 
 
+def _bot():
+    return SimpleNamespace(send_message=AsyncMock())
+
+
+@pytest.mark.parametrize('chat_menu', ['all', 'off'])
+@pytest.mark.parametrize(
+    ('status', 'language', 'expected'),
+    [
+        (409, 'ru', 'Эта ссылка уже использована другим аккаунтом.'),
+        (404, 'ru', 'Ссылка больше не действует.'),
+        (409, 'en', 'This link has already been used by another account.'),
+        (404, 'en', 'This link is no longer valid.'),
+    ],
+    ids=['409-ru', '404-ru', '409-en', '404-en'],
+)
+async def test_taken_or_dead_link_is_told_once(env, monkeypatch, chat_menu, status, language, expected):
+    """Одноразовое приглашение уже у другого аккаунта (409) или ссылка умерла до Start (404): одно короткое
+    сообщение без ссылки на кабинет, и при выключенном меню переписки тоже."""
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', chat_menu)
+    user, bot = _user(language=language), _bot()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.register_status = status
+        env.data['bb_offer_code:7'] = CODE
+        outcome = await offers.after_start(user, bot)
+        assert outcome == ('taken' if status == 409 else 'dead')
+        bot.send_message.assert_awaited_once_with(7, expected)
+        assert env.data == {}
+        # Код использован: следующий /start ничего не пишет.
+        await offers.after_start(user, bot)
+        bot.send_message.assert_awaited_once()
+        assert len(server.calls('POST', '/invite/offers/register')) == 1
+
+
+async def test_recorded_offer_sends_nothing(env, monkeypatch):
+    """204: предложение записано, кнопку покажет меню; отдельного сообщения нет."""
+    user, bot = _user(), _bot()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        env.data['bb_offer_code:7'] = CODE
+        assert await offers.after_start(user, bot) == 'ok'
+    bot.send_message.assert_not_awaited()
+
+
+async def test_unavailable_sends_nothing_and_keeps_code(env, monkeypatch):
+    """guest-key не ответил по договору (5xx) или не ответил вовсе: молча, код снова ждёт в Redis."""
+    user, bot = _user(), _bot()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.register_status = 500
+        env.data['bb_offer_code:7'] = CODE
+        assert await offers.after_start(user, bot) == 'unavailable'
+        assert env.data == {'bb_offer_code:7': CODE}
+    probe = await asyncio.start_server(lambda r, w: None, '127.0.0.1', 0)
+    closed_port = probe.sockets[0].getsockname()[1]
+    probe.close()
+    await probe.wait_closed()
+    monkeypatch.setattr(settings, 'BB_OFFERS_URL', f'http://127.0.0.1:{closed_port}/invite/offers')
+    assert await offers.after_start(user, bot) == 'unavailable'
+    assert env.data == {'bb_offer_code:7': CODE}
+    assert env.ttl['bb_offer_code:7'] == 24 * 3600
+    bot.send_message.assert_not_awaited()
+
+
+async def test_notice_failure_does_not_break_start(env, monkeypatch):
+    """Бот заблокирован или Telegram не принял сообщение: /start идёт дальше, код не возвращается."""
+    user, bot = _user(), _bot()
+    bot.send_message.side_effect = RuntimeError('Forbidden: bot was blocked by the user')
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.register_status = 409
+        env.data['bb_offer_code:7'] = CODE
+        assert await offers.after_start(user, bot) == 'taken'
+    bot.send_message.assert_awaited_once()
+    assert env.data == {}
+
+
 def test_claim_waits_longer_than_menu():
     """Нажатие: guest-key до ответа спрашивает кабинет и шлёт сообщения; меню ждёт не дольше 2 с."""
     assert offers.TIMEOUT == 2
@@ -599,21 +693,26 @@ def test_after_start_hooks_in_registration_paths():
         source = _source(function)
         # Уже активный (регистрация закончилась в другом месте) и только что зарегистрированный.
         assert source.count('await bb_offers.after_start(') == 2, function.__name__
-        new_user = source.rindex('await bb_offers.after_start(user)')
-        # После создания пользователя и state.clear(), до приветствия или меню (оба пути).
+        # Каждый вызов получает бота этого обновления: «ссылка уже использована» уходит человеку в чат.
+        bot = 'callback.bot' if 'callback' in function.__name__ else 'message.bot'
+        new_user = source.rindex(f'await bb_offers.after_start(user, {bot})')
+        # После создания пользователя и state.clear(), до приветствия или меню (оба пути): сообщение о ссылке
+        # приходит перед ними, меню с кнопками остаётся последним.
         assert source.rindex('await state.clear()') < new_user < source.index('get_welcome_text_for_user')
-        assert source.index('await bb_offers.after_start(existing_user)') < source.index(
+        assert source.index(f'await bb_offers.after_start(existing_user, {bot})') < source.index(
             'await maybe_send_bb_keyboard('
         )
 
     cmd_start = _source(start.cmd_start)
     assert cmd_start.count('bb_offers.stash_start_payload(') == 1
     assert cmd_start.index('bb_offers.stash_start_payload(') < cmd_start.index('_evaluate_telegram_registration_access')
-    assert cmd_start.count('await bb_offers.after_start(user)') == 1
+    assert cmd_start.count('await bb_offers.after_start(') == 1
+    assert cmd_start.count('await bb_offers.after_start(user, message.bot)') == 1
 
     channel_check = _source(start.required_sub_channel_check)
-    assert channel_check.count('await bb_offers.after_start(user)') == 1
-    assert channel_check.index('await bb_offers.after_start(user)') < channel_check.index('try_send_rich_main_menu(')
+    assert channel_check.count('await bb_offers.after_start(') == 1
+    after = channel_check.index('await bb_offers.after_start(user, query.bot)')
+    assert after < channel_check.index('try_send_rich_main_menu(')
 
 
 async def test_channel_check_does_not_keep_offer_as_bedolaga_payload(env, monkeypatch):

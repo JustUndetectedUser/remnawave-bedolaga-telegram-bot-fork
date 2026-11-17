@@ -361,10 +361,14 @@ async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
     except bb_offers.Unavailable:
         # Сбой связи не «предложение пропало»: кнопка остаётся (кэш не тронут), человек нажмёт ещё раз.
         key = 'offer_retry'
-    if key:
-        await callback.answer(bb_text(language, key))
-    else:
-        await callback.answer()
+    try:
+        # Нажатие могло идти до CLAIM_TIMEOUT: Telegram уже не принимает ответ («query is too old»), меню всё равно
+        if key:
+            await callback.answer(bb_text(language, key))
+        else:
+            await callback.answer()
+    except Exception as error:
+        logger.warning('BlackBird: ответ на нажатие не принят', key=key, error=repr(error))
     await bb_edit_main_menu(callback, db_user, db)
 
 

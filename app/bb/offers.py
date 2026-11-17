@@ -10,8 +10,9 @@ guest-key: внутренний адрес BB_OFFERS_URL (http://guest-key:8091/
   GET  {url}           -> 200 {"offers": [{"id", "title", "text", "state": "open" | "pending"}]}
   POST {url}/register  {"code"} -> 204; 404 not_found; 409 taken
   POST {url}/claim     {"id"}   -> 200 {"state": "pending" | "member" | "granted"}; 404 not_found; 409 decided
-Сообщения админам и приветствие группы шлёт сам guest-key, бот своих не пишет. Пустой BB_OFFERS_URL: механизма нет,
-ни одного запроса.
+Сообщения админам и приветствие группы шлёт сам guest-key. Бот пишет сам только одно: после /start offer_<код>, если
+ссылку уже взял другой аккаунт (409) или она умерла (404), короткое «ссылка уже использована» / «больше не действует»
+(after_start). Пустой BB_OFFERS_URL: механизма нет, ни одного запроса.
 
 Сбой связи (таймаут, нет соединения, 5xx, неожиданный ответ) не значит «предложения нет»: при нажатии это
 Unavailable («попробуйте ещё раз», кнопка остаётся), и кэш он не трогает. «Предложения нет» говорят только 404/409
@@ -21,11 +22,13 @@ Unavailable («попробуйте ещё раз», кнопка остаётс
 import hashlib
 import re
 import time
+from enum import StrEnum
 from typing import Any
 
 import aiohttp
 import structlog
 
+from app.bb.texts import bb_text
 from app.cabinet.auth.jwt_handler import create_access_token
 from app.config import settings
 from app.utils.cache import cache
@@ -51,6 +54,20 @@ _offers_cache: dict[int, tuple[float, list[dict]]] = {}
 
 class Unavailable(Exception):
     """guest-key не ответил или ответил не по договору; о самих предложениях это ничего не говорит."""
+
+
+class Registered(StrEnum):
+    """Итог записи кода ссылки (POST /register)."""
+
+    OK = 'ok'  # 204: записано (или уже было); правду о кнопке говорит GET
+    TAKEN = 'taken'  # 409: одноразовое приглашение уже у другого аккаунта
+    DEAD = 'dead'  # 404: ссылка не живая (отозвана, истекла, нет такой)
+    UNAVAILABLE = 'unavailable'  # сеть, таймаут, 401, 5xx: код стоит прислать ещё раз
+    SKIPPED = 'skipped'  # механизм выключен (пустой BB_OFFERS_URL) или нет аккаунта: ничего не спрошено
+
+
+# Что сказать человеку после /start offer_<код>: только когда ссылка ему уже не достанется
+_NOTICES = {Registered.TAKEN: 'offer_taken', Registered.DEAD: 'offer_dead'}
 
 
 def offer_code(payload: str | None) -> str | None:
@@ -175,34 +192,36 @@ async def fetch_offers(user) -> list[dict]:
         return list(cached[1]) if cached else []
 
 
-async def register_offer(user, code: str) -> None:
-    """Код ссылки промогруппы -> предложение этого аккаунта. Молча: итог видно по fetch_offers.
+async def register_offer(user, code: str) -> Registered:
+    """Код ссылки промогруппы -> предложение этого аккаунта. Без сообщений человеку: итог видно по fetch_offers.
 
     204 не обещает открытого предложения (например, решение по заявке уже было): правду говорит GET.
     """
-    await _register(user, code)
+    return await _register(user, code)
 
 
-async def _register(user, code: str) -> bool:
-    """False: guest-key не ответил или ответил неожиданно (сеть, таймаут, 401, 5xx): код стоит прислать ещё раз."""
-    if not _ready(user) or not _START_RE.fullmatch(f'offer_{code}'):
-        return True
+async def _register(user, code: str) -> Registered:
+    """POST /register. UNAVAILABLE: guest-key не ответил или ответил неожиданно, код стоит прислать ещё раз."""
+    if not _ready(user):
+        return Registered.SKIPPED
+    if not _START_RE.fullmatch(f'offer_{code}'):
+        return Registered.DEAD
     try:
         status, body = await _request('POST', f'{_url()}/register', user, {'code': code})
         if status == 204:
             logger.info('BlackBird: предложение промогруппы записано', user_id=user.id)
-            return True
+            return Registered.OK
         if status in {404, 409}:
             # not_found: ссылка не живая; taken: одноразовое приглашение уже у другого аккаунта.
             logger.info('BlackBird: предложение не записано', status=status, error=_error_code(body), user_id=user.id)
-            return True
+            return Registered.TAKEN if status == 409 else Registered.DEAD
         logger.warning(
             'BlackBird: guest-key не записал предложение', status=status, error=_error_code(body), user_id=user.id
         )
-        return False
+        return Registered.UNAVAILABLE
     except Exception as error:
         logger.warning('BlackBird: guest-key недоступен, предложение не записано', error=repr(error), user_id=user.id)
-        return False
+        return Registered.UNAVAILABLE
     finally:
         _forget(user)
 
@@ -250,18 +269,41 @@ async def stash_start_payload(telegram_id: int | None, payload: str | None) -> b
     return True
 
 
-async def after_start(user) -> None:
-    """Человек зарегистрирован: записать предложение по коду из /start offer_<код>, если код ждёт. Молча.
+async def after_start(user, bot=None) -> Registered | None:
+    """Человек зарегистрирован: записать предложение по коду из /start offer_<код>, если код ждёт.
 
-    Не зависит от меню переписки: предложение показывает и кабинет. guest-key не ответил: код снова ждёт
-    (следующий /start), чтобы человеку не пришлось искать ссылку ещё раз.
+    None: кода нет (обычный /start). Не зависит от меню переписки: предложение показывает и кабинет.
+    TAKEN или DEAD: ссылка этому аккаунту уже не достанется, бот пишет одно короткое сообщение (bot - бот этого
+    обновления; без меню и без ссылки на кабинет, тоже при любом BB_CHAT_MENU). Вызовы в app/handlers/start.py стоят
+    до приветствия и меню: сообщение приходит перед ними, меню с кнопками остаётся последним.
+    UNAVAILABLE: guest-key не ответил, код снова ждёт (следующий /start), чтобы человеку не пришлось искать ссылку
+    ещё раз; молча.
     """
     if not _ready(user):
-        return
+        return None
     key = _code_key(user.telegram_id)
     try:
         code = await cache.getdel(key)
-        if code and not await _register(user, str(code)):
+        if not code:
+            return None
+        outcome = await _register(user, str(code))
+        if outcome is Registered.UNAVAILABLE:
             await cache.set(key, str(code), expire=CODE_TTL)
     except Exception as error:
         logger.warning('BlackBird: код предложения не обработан', error=repr(error), user_id=user.id)
+        return None
+    await _tell(bot, user, outcome)
+    return outcome
+
+
+async def _tell(bot, user, outcome: Registered) -> None:
+    """«Эта ссылка уже использована другим аккаунтом.» / «Ссылка больше не действует.»: простой текст в чат."""
+    key = _NOTICES.get(outcome)
+    if key is None or bot is None:
+        return
+    try:
+        await bot.send_message(user.telegram_id, bb_text(getattr(user, 'language', None), key))
+    except Exception as error:
+        logger.warning(
+            'BlackBird: сообщение о ссылке не отправлено', outcome=str(outcome), error=repr(error), user_id=user.id
+        )
