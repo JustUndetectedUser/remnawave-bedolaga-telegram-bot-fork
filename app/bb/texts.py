@@ -52,6 +52,16 @@ TEXTS = {
         'btn_faq': '❓ Вопросы и ответы',
         'renew_topup_short': 'Пополнение получено, но для продления не хватает ещё {missing}.',
         'purchase_topup_short': 'Пополнение получено, но для покупки тарифа не хватает ещё {missing}.',
+        # После оплаты
+        'btn_pay_stars_exact': '⭐ Telegram Stars · ровно {stars} ⭐',
+        'btn_pay_tribute': '💳 Банковская карта (Tribute)',
+        'renewed': '✅ Подписка продлена до {date}.',
+        'renewed_after_topup': (
+            '✅ Подписка продлена до {date}. Пополнение {amount}, списано {price}. На балансе осталось {balance}'
+        ),
+        'purchased_after_topup': (
+            '✅ Тариф {tariff} подключён до {date}. Пополнение {amount}, списано {price}. На балансе осталось {balance}'
+        ),
         # Подключение устройства
         'connect_text': (
             '<b>Подключение устройства</b>\n1. Установите Happ\n'
@@ -123,6 +133,16 @@ TEXTS = {
         'btn_faq': '❓ FAQ',
         'renew_topup_short': 'Top-up received, but {missing} more is needed to renew.',
         'purchase_topup_short': 'Top-up received, but {missing} more is needed to buy the plan.',
+        # After payment
+        'btn_pay_stars_exact': '⭐ Telegram Stars · exactly {stars} ⭐',
+        'btn_pay_tribute': '💳 Bank card (Tribute)',
+        'renewed': '✅ Subscription renewed until {date}.',
+        'renewed_after_topup': (
+            '✅ Subscription renewed until {date}. Top-up {amount}, charged {price}. Balance left {balance}'
+        ),
+        'purchased_after_topup': (
+            '✅ {tariff} is active until {date}. Top-up {amount}, charged {price}. Balance left {balance}'
+        ),
         # Connect a device
         'connect_text': (
             '<b>Connect a device</b>\n1. Install Happ\n'

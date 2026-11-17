@@ -14,6 +14,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb.rollout import chat_menu_enabled  # BlackBird
 from app.config import settings
 from app.database.crud.subscription import (
     create_paid_subscription,
@@ -2897,6 +2898,14 @@ async def confirm_tariff_extend(
             logger.error('Ошибка очистки корзины', error=e)
 
         await state.clear()
+
+        # BlackBird: в меню в переписке короткий ответ «✅ Подписка продлена до …» и «Подключить устройство»
+        if chat_menu_enabled(db_user):
+            from app.bb.renew import renewed_message
+
+            bb_text, bb_keyboard = renewed_message(subscription, db_user.language)
+            await callback.message.edit_text(bb_text, reply_markup=bb_keyboard, parse_mode='HTML')
+            return
 
         traffic = format_traffic(tariff.traffic_limit_gb)
 

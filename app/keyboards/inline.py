@@ -2412,6 +2412,10 @@ def get_payment_methods_keyboard(amount_kopeks: int, language: str = DEFAULT_LAN
     keyboard.append([InlineKeyboardButton(text=texts.BACK, callback_data='menu_balance')])
 
     _apply_payment_name_overrides(keyboard, language)
+    # BlackBird: при нехватке денег (меню в переписке) «Stars · ровно N ⭐» и «Банковская карта (Tribute)»
+    from app.bb.keyboard import label_exact_amount
+
+    label_exact_amount(keyboard, amount_kopeks, language)
     _apply_payment_method_order(keyboard)
 
     return InlineKeyboardMarkup(inline_keyboard=keyboard)

@@ -395,6 +395,11 @@ async def send_cart_notification_after_topup(
     if notify_email:
         await notify_email_user_topup(user, amount_kopeks)
 
+    # BlackBird: сумма пополнения для итога автопокупки в меню в переписке («Пополнение 300 ₽, списано …»)
+    from app.bb.renew import remember_topup
+
+    remember_topup(amount_kopeks)
+
     from app.services.subscription_auto_purchase_service import (
         auto_purchase_saved_cart_after_topup,
         try_auto_extend_expired_after_topup,

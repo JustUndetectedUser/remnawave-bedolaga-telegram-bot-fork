@@ -719,8 +719,14 @@ async def _auto_extend_subscription(
             error=error,
         )
 
+    # BlackBird: в меню в переписке итог с суммами и «Подключить устройство»; тогда (bb_reported)
+    # сообщение Bedolaga ниже не шлём
+    from app.bb.renew import notify_paid_after_topup
+
+    bb_reported = await notify_paid_after_topup(bot, user, end_date=new_end_date, price_kopeks=prepared.price_kopeks)
+
     # Send user notification only for Telegram users
-    if bot and user.telegram_id and settings.is_notifications_enabled():
+    if not bb_reported and bot and user.telegram_id and settings.is_notifications_enabled():
         try:
             auto_message = texts.t(
                 'AUTO_PURCHASE_SUBSCRIPTION_EXTENDED',
@@ -1200,8 +1206,16 @@ async def _auto_purchase_tariff(
             error=error,
         )
 
+    # BlackBird: в меню в переписке итог с суммами и «Подключить устройство»; тогда (bb_reported)
+    # сообщение Bedolaga ниже не шлём
+    from app.bb.renew import notify_paid_after_topup
+
+    bb_reported = await notify_paid_after_topup(
+        bot, user, end_date=subscription.end_date, price_kopeks=final_price, tariff_name=tariff_name_for_label
+    )
+
     # Send user notification only for Telegram users
-    if bot and user.telegram_id and settings.is_notifications_enabled():
+    if not bb_reported and bot and user.telegram_id and settings.is_notifications_enabled():
         try:
             texts = get_texts(getattr(user, 'language', 'ru'))
             period_label = format_period_description(period_days, getattr(user, 'language', 'ru'))

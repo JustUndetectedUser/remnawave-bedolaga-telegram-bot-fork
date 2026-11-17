@@ -8,6 +8,7 @@ notify_renew_shortfall и notify_purchase_shortfall пишут, сколько �
 """
 
 import html
+from contextvars import ContextVar
 
 import structlog
 from aiogram import Bot, Dispatcher, F, types
@@ -19,6 +20,7 @@ from app.bb import tariffs as bb_tariffs
 from app.bb.main_menu import NO_PREVIEW, bb_edit_main_menu, display_name, format_day, is_unlimited
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import bb_count, bb_text
+from app.config import settings
 from app.database.crud.tariff import get_tariff_by_id
 from app.localization.texts import Texts
 from app.services.pricing_engine import pricing_engine
@@ -28,6 +30,12 @@ logger = structlog.get_logger(__name__)
 
 RENEW_DAYS = 30
 RENEWABLE_STATES = frozenset({'active', 'limited', 'expired'})
+
+# Пополнение, после которого идёт автопокупка из корзины: сумма (для итога «Пополнение 300 ₽») и признак,
+# что итог уже написан (тогда Stars не шлёт своё «Платеж успешно обработан»). Ставит
+# payment.common.send_cart_notification_after_topup; живёт в контексте обработки одного платежа.
+_topup_amount: ContextVar[int | None] = ContextVar('bb_topup_amount', default=None)
+_topup_reported: ContextVar[bool] = ContextVar('bb_topup_reported', default=False)
 
 
 def renewable(subscription) -> bool:
@@ -180,6 +188,67 @@ async def notify_renew_shortfall(
 async def notify_purchase_shortfall(bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int, period: int) -> None:
     """Покупка тарифа из корзины, в том числе пробный -> платный (_auto_purchase_tariff)."""
     await _notify_shortfall(bot, user, missing_kopeks, 'purchase_topup_short')
+
+
+def _connect_keyboard(language: str, *, back: bool = False) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton(text=bb_text(language, 'btn_connect'), callback_data='subscription_connect')]]
+    if back:
+        rows.append([InlineKeyboardButton(text=bb_text(language, 'btn_back'), callback_data='back_to_menu')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def renewed_message(subscription, language: str) -> tuple[str, InlineKeyboardMarkup]:
+    """Продление сразу (денег хватило, tariff_ext_confirm): «✅ Подписка продлена до …»."""
+    end_date = getattr(subscription, 'end_date', None)
+    text = bb_text(language, 'renewed').format(date=format_day(end_date, language) if end_date else '')
+    return text, _connect_keyboard(language, back=True)
+
+
+def remember_topup(amount_kopeks: int) -> None:
+    """Хук в send_cart_notification_after_topup: сумма пополнения до автопокупки из корзины."""
+    _topup_amount.set(amount_kopeks)
+    _topup_reported.set(False)
+
+
+def topup_reported() -> bool:
+    """Итог автопокупки по этому пополнению уже отправлен (меню в переписке)."""
+    return _topup_reported.get()
+
+
+async def notify_paid_after_topup(
+    bot: Bot | None, user, *, end_date, price_kopeks: int, tariff_name: str | None = None
+) -> bool:
+    """Итог автопродления (tariff_name None) или покупки тарифа после пополнения с суммами и «Подключить устройство».
+
+    True: сообщение ушло, сообщение Bedolaga не нужно. False (меню выключено, сумма пополнения неизвестна,
+    ошибка Telegram): пусть пишет Bedolaga.
+    """
+    amount = _topup_amount.get()
+    chat_id = getattr(user, 'telegram_id', None)
+    if bot is None or not chat_id or amount is None or not chat_menu_enabled(user):
+        return False
+    if not settings.is_notifications_enabled():
+        return False
+    language = getattr(user, 'language', None) or 'ru'
+    values = {
+        'date': format_day(end_date, language) if end_date else '',
+        'amount': Texts.format_price(amount),
+        'price': Texts.format_price(price_kopeks),
+        'balance': Texts.format_price(getattr(user, 'balance_kopeks', 0) or 0),
+    }
+    if tariff_name is None:
+        text = bb_text(language, 'renewed_after_topup').format(**values)
+    else:
+        text = bb_text(language, 'purchased_after_topup').format(
+            tariff=html.escape(display_name(tariff_name)), **values
+        )
+    try:
+        await bot.send_message(chat_id, text, reply_markup=_connect_keyboard(language), parse_mode='HTML')
+    except Exception:
+        logger.exception('BlackBird: не удалось написать итог оплаты', chat_id=chat_id)
+        return False
+    _topup_reported.set(True)
+    return True
 
 
 def register_handlers(dp: Dispatcher) -> None:

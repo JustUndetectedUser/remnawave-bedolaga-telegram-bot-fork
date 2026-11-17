@@ -5,7 +5,13 @@
 
 import structlog
 from aiogram import Bot
-from aiogram.types import KeyboardButton, MenuButtonCommands, MenuButtonDefault, ReplyKeyboardMarkup
+from aiogram.types import (
+    InlineKeyboardButton,
+    KeyboardButton,
+    MenuButtonCommands,
+    MenuButtonDefault,
+    ReplyKeyboardMarkup,
+)
 
 from app.bb.rollout import chat_menu_enabled, chat_menu_rolled_out
 from app.bb.texts import bb_text
@@ -91,3 +97,25 @@ async def reset_bot_menu_button(bot: Bot) -> None:
         logger.info('BlackBird: кнопка меню бота сброшена на обычную')
     except Exception as error:
         logger.warning('BlackBird: не удалось сбросить кнопку меню бота', error=str(error))
+
+
+def label_exact_amount(keyboard: list[list[InlineKeyboardButton]], amount_kopeks: int, language: str) -> None:
+    """Кнопки оплаты недостающей суммы: «⭐ Telegram Stars · ровно N ⭐» и «💳 Банковская карта (Tribute)».
+
+    Хук в get_payment_methods_keyboard: сумма там известна только на экранах нехватки денег. Клавиатура
+    не знает человека, поэтому подпись работает при admins и all для всех. N тем же расчётом, что у счёта
+    Stars (settings.rubles_to_stars).
+    """
+    if amount_kopeks <= 0 or not chat_menu_rolled_out():
+        return
+    labels = {'tribute': bb_text(language, 'btn_pay_tribute')}
+    try:
+        stars = settings.rubles_to_stars(amount_kopeks / 100)
+        labels['stars'] = bb_text(language, 'btn_pay_stars_exact').format(stars=stars)
+    except ValueError as error:
+        logger.warning('BlackBird: не удалось пересчитать сумму в звёзды', error=str(error))
+    for row in keyboard:
+        for index, button in enumerate(row):
+            parts = (button.callback_data or '').split('|')
+            if len(parts) == 3 and parts[0] == 'topup_amount' and parts[1] in labels:
+                row[index] = button.model_copy(update={'text': labels[parts[1]]})
