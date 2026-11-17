@@ -1216,6 +1216,13 @@ async def process_language_change(
     updated_user = await update_user(db, db_user, language=resolved_language)
     texts = get_texts(updated_user.language)
 
+    # BlackBird: в меню переписки клавиатура над строкой ввода приходит заново, уже на новом языке
+    from app.bb import main_menu as bb_main_menu
+
+    if await bb_main_menu.bb_after_language_change(callback, updated_user, db):
+        await callback.answer(texts.t('LANGUAGE_SELECTED', '🌐 Язык интерфейса обновлен.'))
+        return
+
     await show_main_menu(
         callback,
         updated_user,

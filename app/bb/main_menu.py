@@ -19,7 +19,8 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bb.keyboard import maybe_send_bb_keyboard_once
+from app.bb.keyboard import maybe_send_bb_keyboard, maybe_send_bb_keyboard_once
+from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import bb_count, bb_text
 from app.config import settings
 from app.database.crud.tariff import get_tariff_by_id, get_trial_tariff
@@ -214,6 +215,35 @@ async def bb_send_main_menu(bot: Bot, chat_id: int, db_user, db: AsyncSession) -
     except Exception:
         logger.exception('BlackBird: не удалось отправить меню', chat_id=chat_id)
         return False
+
+
+async def bb_after_language_change(callback: CallbackQuery, db_user, db: AsyncSession) -> bool:
+    """Смена языка в меню переписки.
+
+    Клавиатуру над строкой ввода Telegram меняет только новым сообщением: присылаем её на новом языке, затем
+    меню (оно должно быть последним) и только потом убираем экран выбора языка. False: меню переписки выключено
+    или меню не собралось; тогда Bedolaga рисует своё меню на месте экрана выбора языка.
+    """
+    message, bot = callback.message, callback.bot
+    if not chat_menu_enabled(db_user) or message is None or bot is None:
+        return False
+    chat_id = message.chat.id
+    try:
+        text, keyboard = await build_bb_main_menu(db_user, db)
+    except Exception:
+        logger.exception('BlackBird: не удалось собрать меню после смены языка', chat_id=chat_id)
+        return False
+    await maybe_send_bb_keyboard(bot, chat_id, db_user)
+    try:
+        await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML', link_preview_options=NO_PREVIEW)
+    except Exception:
+        logger.exception('BlackBird: не удалось отправить меню после смены языка', chat_id=chat_id)
+        return False
+    try:
+        await message.delete()
+    except Exception as error:
+        logger.warning('BlackBird: не удалось убрать экран выбора языка', chat_id=chat_id, error=str(error))
+    return True
 
 
 async def bb_edit_main_menu(callback: CallbackQuery, db_user, db: AsyncSession) -> bool:
