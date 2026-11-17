@@ -189,3 +189,19 @@ async def test_handle_connect_uses_bb_screen_when_menu_on(monkeypatch):
         await links.handle_connect_subscription(callback, _user(), MagicMock(), bb_intro='I')
     shown.assert_awaited_once()
     assert shown.await_args.kwargs == {'intro': 'I'}
+
+
+@pytest.mark.parametrize('link', [LINK, 'https://sub.example.com/' + 'a' * 300])
+def test_hidden_link_not_shown(monkeypatch, link):
+    monkeypatch.setattr(settings, 'HIDE_SUBSCRIPTION_LINK', True)
+    text, kb = connect.bb_connect_screen(_user(), _sub(link), 'ru')
+    assert link not in text
+    assert '<code>' not in text
+    assert all(b.copy_text is None for row in kb.inline_keyboard for b in row)
+    assert _labels(kb) == [['📲 Открыть в Happ'], ['⬇️ Установить Happ'], ['← Назад']]
+
+
+def test_hidden_link_off_unchanged(monkeypatch):
+    monkeypatch.setattr(settings, 'HIDE_SUBSCRIPTION_LINK', False)
+    _, kb = connect.bb_connect_screen(_user(), _sub(), 'ru')
+    assert kb.inline_keyboard[1][0].copy_text.text == LINK

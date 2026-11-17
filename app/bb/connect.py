@@ -65,7 +65,10 @@ def bb_connect_screen(
     open_url = happ_open_url(link)
     if open_url:
         rows.append([_button(bb_text(language, 'btn_open_happ'), url=open_url)])
-    if len(link) <= COPY_TEXT_LIMIT:
+    if settings.should_hide_subscription_link():
+        # HIDE_SUBSCRIPTION_LINK: ссылку не показываем и не даём скопировать, остаётся «Открыть в Happ».
+        pass
+    elif len(link) <= COPY_TEXT_LIMIT:
         rows.append([_button(bb_text(language, 'btn_copy_link'), copy_text=CopyTextButton(text=link))])
     else:
         text += f'\n\n{bb_text(language, "connect_link_text")}\n<code>{html.escape(link)}</code>'
