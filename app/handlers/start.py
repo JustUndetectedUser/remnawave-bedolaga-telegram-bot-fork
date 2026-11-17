@@ -13,7 +13,7 @@ from aiogram.fsm.context import FSMContext
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bb.entry import maybe_send_bb_keyboard  # BlackBird
+from app.bb.keyboard import maybe_send_bb_keyboard  # BlackBird
 from app.config import settings
 from app.database.crud.campaign import (
     get_campaign_by_id,
@@ -1655,11 +1655,11 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
             is_moderator=is_moderator,
             custom_buttons=custom_buttons,
         )
+        # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
+        await maybe_send_bb_keyboard(message.bot, message.chat.id, user)
         if not await try_answer_rich_main_menu(message, user, texts, db, keyboard):
             menu_text = await get_main_menu_text(user, texts, db)
             await answer_menu_with_media(message, menu_text, keyboard, db)
-        # BlackBird: две кнопки над строкой ввода
-        await maybe_send_bb_keyboard(message.bot, message.chat.id, user)
 
         if pinned_message and not pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)
@@ -2332,11 +2332,11 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, existing_user, pinned_message)
+            # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
+            await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(callback.message, existing_user, texts, db, keyboard):
                 menu_text = await get_main_menu_text(existing_user, texts, db)
                 await answer_menu_with_media(callback.message, menu_text, keyboard, db)
-            # BlackBird: две кнопки над строкой ввода
-            await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, existing_user)
             if pinned_message and not pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, existing_user, pinned_message)
         except Exception as e:
@@ -2619,11 +2619,11 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, user, pinned_message)
+            # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
+            await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, user)
             if not await try_answer_rich_main_menu(callback.message, user, texts, db, keyboard):
                 menu_text = await get_main_menu_text(user, texts, db)
                 await answer_menu_with_media(callback.message, menu_text, keyboard, db)
-            # BlackBird: две кнопки над строкой ввода
-            await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, user)
             if pinned_message and not pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, user, pinned_message)
             logger.info('✅ Главное меню показано пользователю', telegram_id=user.telegram_id)
@@ -2694,11 +2694,11 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, existing_user, pinned_message)
+            # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
+            await maybe_send_bb_keyboard(message.bot, message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(message, existing_user, texts, db, keyboard):
                 menu_text = await get_main_menu_text(existing_user, texts, db)
                 await answer_menu_with_media(message, menu_text, keyboard, db)
-            # BlackBird: две кнопки над строкой ввода
-            await maybe_send_bb_keyboard(message.bot, message.chat.id, existing_user)
             if pinned_message and not pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, existing_user, pinned_message)
         except Exception as e:
@@ -3018,11 +3018,11 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, user, pinned_message)
+            # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
+            await maybe_send_bb_keyboard(message.bot, message.chat.id, user)
             if not await try_answer_rich_main_menu(message, user, texts, db, keyboard):
                 menu_text = await get_main_menu_text(user, texts, db)
                 await answer_menu_with_media(message, menu_text, keyboard, db)
-            # BlackBird: две кнопки над строкой ввода
-            await maybe_send_bb_keyboard(message.bot, message.chat.id, user)
             logger.info('✅ Главное меню показано пользователю', telegram_id=user.telegram_id)
             if pinned_message and not pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, user, pinned_message)

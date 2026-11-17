@@ -4,8 +4,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiogram.dispatcher.event.bases import SkipHandler
 
-from app.bb import entry, rollout
-from app.bb.entry import BB_BTN_BOT, BB_BTN_CABINET, bb_reply_keyboard
+from app.bb import entry, keyboard, rollout
+from app.bb.entry import BB_BTN_BOT, BB_BTN_CABINET
+from app.bb.keyboard import bb_reply_keyboard
 from app.config import settings
 
 
@@ -113,7 +114,7 @@ async def test_send_bb_keyboard_never_raises():
     bot = MagicMock()
     bot.send_message = AsyncMock(side_effect=RuntimeError('x'))
     bot.set_chat_menu_button = AsyncMock(side_effect=RuntimeError('y'))
-    await entry.send_bb_keyboard(bot, 5, 'en')
+    await keyboard.send_bb_keyboard(bot, 5, 'en')
     bot.send_message.assert_awaited_once()
     bot.set_chat_menu_button.assert_awaited_once()
 
@@ -193,3 +194,215 @@ async def test_dispatcher_disabled_falls_through_to_state_handler(monkeypatch):
     state, bot = await _feed(dp, BB_BTN_BOT, state_key=False)
     await bot.session.close()
     assert calls == ['catch_all']
+
+
+# --- Кнопка слева от поля ввода (F1) ---
+
+
+@pytest.mark.asyncio
+async def test_send_bb_keyboard_sets_commands_button_for_chat():
+    """MenuButtonDefault для чата значит «как у бота», то есть снова «Кабинет»; MenuButtonCommands без команд пуст."""
+    from aiogram.types import MenuButtonCommands
+
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.set_chat_menu_button = AsyncMock()
+    await keyboard.send_bb_keyboard(bot, 5, 'ru')
+    kwargs = bot.set_chat_menu_button.await_args.kwargs
+    assert kwargs['chat_id'] == 5
+    assert isinstance(kwargs['menu_button'], MenuButtonCommands)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(('mode', 'reset'), [('all', True), ('admins', True), ('off', False)])
+async def test_startup_resets_bot_wide_menu_button(monkeypatch, mode, reset):
+    """MENU_BUTTON_WEBAPP_ENABLED=false: при меню в переписке кнопка бота «Кабинет» сбрасывается на старте."""
+    from aiogram.types import MenuButtonDefault
+
+    from app.utils.chat_menu_button import configure_chat_menu_button
+
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', mode)
+    monkeypatch.setattr(settings, 'MENU_BUTTON_WEBAPP_ENABLED', False)
+    bot = MagicMock()
+    bot.set_chat_menu_button = AsyncMock()
+
+    assert await configure_chat_menu_button(bot) is False
+
+    if not reset:
+        bot.set_chat_menu_button.assert_not_awaited()
+        return
+    bot.set_chat_menu_button.assert_awaited_once()
+    kwargs = bot.set_chat_menu_button.await_args.kwargs
+    assert kwargs.get('chat_id') is None
+    assert isinstance(kwargs['menu_button'], MenuButtonDefault)
+
+    # Ошибка Telegram не роняет старт.
+    bot.set_chat_menu_button = AsyncMock(side_effect=RuntimeError('telegram down'))
+    assert await configure_chat_menu_button(bot) is False
+
+
+@pytest.mark.asyncio
+async def test_startup_keeps_webapp_button_when_enabled(monkeypatch):
+    from aiogram.types import MenuButtonWebApp
+
+    from app.utils.chat_menu_button import configure_chat_menu_button
+
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'all')
+    monkeypatch.setattr(settings, 'MENU_BUTTON_WEBAPP_ENABLED', True)
+    monkeypatch.setattr(settings, 'MENU_BUTTON_WEBAPP_URL', 'https://cab.example')
+    bot = MagicMock()
+    bot.set_chat_menu_button = AsyncMock()
+    assert await configure_chat_menu_button(bot) is True
+    assert isinstance(bot.set_chat_menu_button.await_args.kwargs['menu_button'], MenuButtonWebApp)
+
+
+# --- Кнопки над строкой ввода у тех, кто уже в боте (F2) ---
+
+
+class _FakeCache:
+    """Как app.utils.cache.cache: без Redis setnx и exists отвечают False."""
+
+    def __init__(self, connected=True):
+        self.connected = connected
+        self.data = {}
+
+    async def setnx(self, key, value, expire=None):
+        if not self.connected or key in self.data:
+            return False
+        self.data[key] = (value, expire)
+        return True
+
+    async def set(self, key, value, expire=None):
+        if not self.connected:
+            return False
+        self.data[key] = (value, expire)
+        return True
+
+    async def exists(self, key):
+        return self.connected and key in self.data
+
+
+def _menu_user():
+    return SimpleNamespace(
+        id=42,
+        telegram_id=7,
+        language='ru',
+        balance_kopeks=12000,
+        auth_type='telegram',
+        is_trial_already_used=lambda: True,
+        subscription=None,
+    )
+
+
+def _sent_reply_keyboards(bot):
+    from aiogram.types import ReplyKeyboardMarkup
+
+    return [
+        c for c in bot.send_message.await_args_list if isinstance(c.kwargs.get('reply_markup'), ReplyKeyboardMarkup)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_first_menu_render_sends_keyboard_once(monkeypatch, enabled):
+    from app.bb import main_menu
+
+    fake = _FakeCache()
+    monkeypatch.setattr(keyboard, 'cache', fake)
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.set_chat_menu_button = AsyncMock()
+    user = _menu_user()
+
+    assert await main_menu.bb_send_main_menu(bot, 7, user, MagicMock()) is True
+    assert len(_sent_reply_keyboards(bot)) == 1
+    # Сначала клавиатура, последним сообщение с меню и его кнопками.
+    calls = bot.send_message.await_args_list
+    assert len(calls) == 2 and calls[0].args[1] == 'Кнопки «Вызвать бота» и «В веб-кабинет» всегда над строкой ввода.'
+    assert 'bb_kb_sent:7' in fake.data and fake.data['bb_kb_sent:7'][1] == 30 * 24 * 3600
+
+    bot.send_message.reset_mock()
+    assert await main_menu.bb_send_main_menu(bot, 7, user, MagicMock()) is True
+    assert _sent_reply_keyboards(bot) == []
+    bot.send_message.assert_awaited_once()
+
+    # Правка меню на месте (back_to_menu) у того, кому клавиатуру ещё не присылали.
+    other = _FakeCache()
+    monkeypatch.setattr(keyboard, 'cache', other)
+    callback = MagicMock()
+    callback.bot = bot
+    bot.send_message.reset_mock()
+    bot.edit_message_text = AsyncMock()
+    callback.message.text = 'старое меню'
+    callback.message.photo = None
+    callback.message.chat.id = 7
+    callback.message.message_id = 99
+    assert await main_menu.bb_edit_main_menu(callback, user, MagicMock()) is True
+    assert len(_sent_reply_keyboards(bot)) == 1
+    bot.edit_message_text.assert_awaited_once()
+    bot.send_message.reset_mock()
+    assert await main_menu.bb_edit_main_menu(callback, user, MagicMock()) is True
+    bot.send_message.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_keyboard_sent_anyway_without_redis(monkeypatch, enabled):
+    from app.bb import main_menu
+
+    monkeypatch.setattr(keyboard, 'cache', _FakeCache(connected=False))
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.set_chat_menu_button = AsyncMock()
+    for _ in range(2):
+        bot.send_message.reset_mock()
+        assert await main_menu.bb_send_main_menu(bot, 7, _menu_user(), MagicMock()) is True
+        assert len(_sent_reply_keyboards(bot)) == 1
+
+
+@pytest.mark.asyncio
+async def test_start_keyboard_marks_flag(monkeypatch, enabled):
+    """/start присылает клавиатуру всегда и ставит метку: следующее меню её не дублирует."""
+    from app.bb import main_menu
+
+    fake = _FakeCache()
+    monkeypatch.setattr(keyboard, 'cache', fake)
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.set_chat_menu_button = AsyncMock()
+    user = _menu_user()
+    fake.data['bb_kb_sent:7'] = (1, 1)
+
+    await keyboard.maybe_send_bb_keyboard(bot, 7, user)
+    assert len(_sent_reply_keyboards(bot)) == 1
+
+    del fake.data['bb_kb_sent:7']
+    await keyboard.maybe_send_bb_keyboard(bot, 7, user)
+    assert 'bb_kb_sent:7' in fake.data
+    bot.send_message.reset_mock()
+    await main_menu.bb_send_main_menu(bot, 7, user, MagicMock())
+    assert _sent_reply_keyboards(bot) == []
+
+
+@pytest.mark.asyncio
+async def test_no_keyboard_when_disabled(monkeypatch):
+
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'off')
+    monkeypatch.setattr(keyboard, 'cache', _FakeCache())
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    await keyboard.maybe_send_bb_keyboard_once(bot, 7, _menu_user())
+    await keyboard.maybe_send_bb_keyboard(bot, 7, _menu_user())
+    bot.send_message.assert_not_awaited()
+
+
+def test_start_sends_keyboard_before_menu():
+    """/start и регистрация: заметка с клавиатурой до меню, последним остаётся меню с его кнопками (F9)."""
+    from pathlib import Path
+
+    from app.handlers import start
+
+    lines = Path(start.__file__).read_text(encoding='utf-8').splitlines()
+    calls = [i for i, line in enumerate(lines) if 'await maybe_send_bb_keyboard(' in line]
+    assert len(calls) == 5
+    for i in calls:
+        following = lines[i + 1 : i + 4]
+        assert any('try_answer_rich_main_menu(' in line for line in following), lines[i - 2 : i + 4]

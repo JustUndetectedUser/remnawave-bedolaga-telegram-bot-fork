@@ -19,6 +19,7 @@ from aiogram.types import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb.keyboard import maybe_send_bb_keyboard_once
 from app.bb.texts import bb_count, bb_text
 from app.config import settings
 from app.database.crud.tariff import get_tariff_by_id, get_trial_tariff
@@ -203,6 +204,8 @@ async def bb_send_main_menu(bot: Bot, chat_id: int, db_user, db: AsyncSession) -
     """Новое сообщение с меню. False: не получилось, Bedolaga рисует своё меню."""
     try:
         text, keyboard = await build_bb_main_menu(db_user, db)
+        # Клавиатура над строкой ввода тем, кто пришёл до включения меню: до меню, чтобы меню было последним.
+        await maybe_send_bb_keyboard_once(bot, chat_id, db_user)
         await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML', link_preview_options=NO_PREVIEW)
         return True
     except TelegramForbiddenError:
@@ -224,6 +227,7 @@ async def bb_edit_main_menu(callback: CallbackQuery, db_user, db: AsyncSession) 
     except Exception:
         logger.exception('BlackBird: не удалось собрать меню', chat_id=chat_id)
         return False
+    await maybe_send_bb_keyboard_once(bot, chat_id, db_user)
     try:
         if not isinstance(message, InaccessibleMessage) and message.text is not None and not message.photo:
             try:

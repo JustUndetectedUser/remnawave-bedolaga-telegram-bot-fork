@@ -1,17 +1,10 @@
-"""Вход в бот: две постоянные кнопки над строкой ввода."""
+"""Вход в бот: нажатия двух постоянных кнопок над строкой ввода (сама клавиатура в app.bb.keyboard)."""
 
 import structlog
-from aiogram import Bot, Dispatcher, F, types
+from aiogram import Dispatcher, F, types
 from aiogram.dispatcher.event.bases import SkipHandler
 from aiogram.fsm.context import FSMContext
-from aiogram.types import (
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    MenuButtonDefault,
-    ReplyKeyboardMarkup,
-    WebAppInfo,
-)
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bb import connect as bb_connect, more as bb_more, renew as bb_renew, tariffs as bb_tariffs
@@ -29,33 +22,6 @@ BB_BTN_BOT = TEXTS['ru']['btn_bot']
 BB_BTN_CABINET = TEXTS['ru']['btn_cabinet']
 BB_BTN_BOT_EN = TEXTS['en']['btn_bot']
 BB_BTN_CABINET_EN = TEXTS['en']['btn_cabinet']
-
-
-def bb_reply_keyboard(language: str) -> ReplyKeyboardMarkup:
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text=bb_text(language, 'btn_bot')), KeyboardButton(text=bb_text(language, 'btn_cabinet'))]
-        ],
-        is_persistent=True,
-        resize_keyboard=True,
-    )
-
-
-async def send_bb_keyboard(bot: Bot, chat_id: int, language: str) -> None:
-    """Короткое сообщение с клавиатурой и сброс кнопки слева для чата. Ошибки только в лог."""
-    try:
-        await bot.send_message(chat_id, bb_text(language, 'keyboard_note'), reply_markup=bb_reply_keyboard(language))
-    except Exception as error:
-        logger.warning('BlackBird: не удалось отправить клавиатуру', chat_id=chat_id, error=str(error))
-    try:
-        await bot.set_chat_menu_button(chat_id=chat_id, menu_button=MenuButtonDefault())
-    except Exception as error:
-        logger.warning('BlackBird: не удалось сбросить кнопку меню', chat_id=chat_id, error=str(error))
-
-
-async def maybe_send_bb_keyboard(bot: Bot, chat_id: int, user) -> None:
-    if chat_menu_enabled(user):
-        await send_bb_keyboard(bot, chat_id, getattr(user, 'language', None) or 'ru')
 
 
 async def _delete_incoming(message: types.Message) -> None:

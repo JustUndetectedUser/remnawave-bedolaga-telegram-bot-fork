@@ -38,6 +38,10 @@ async def configure_chat_menu_button(bot: Bot) -> bool:
     """
     url = _resolve_menu_button_url()
     if not url:
+        # BlackBird: при меню в переписке и выключенной кнопке убрать «Кабинет», который Telegram помнит
+        from app.bb.keyboard import reset_bot_menu_button
+
+        await reset_bot_menu_button(bot)
         return False
 
     text = (settings.MENU_BUTTON_WEBAPP_TEXT or 'Кабинет').strip() or 'Кабинет'

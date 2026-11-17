@@ -283,6 +283,8 @@ async def test_render_hooks_use_bb_menu(monkeypatch):
 
     monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'all')
     monkeypatch.setattr(main_menu, 'get_tariff_by_id', AsyncMock(return_value=_tariff()))
+    # Клавиатуру этому человеку уже присылали (первый показ проверяет tests/bb/test_entry.py).
+    monkeypatch.setattr(main_menu, 'maybe_send_bb_keyboard_once', AsyncMock())
     user = _user(subscription=_sub())
 
     # /start, «Вызвать бота»: новое сообщение, без картинки и rich-меню.
