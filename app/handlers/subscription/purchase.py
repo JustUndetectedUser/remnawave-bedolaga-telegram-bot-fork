@@ -1116,15 +1116,20 @@ async def activate_trial(callback: types.CallbackQuery, db_user: User, db: Async
         subscription_link = get_display_subscription_link(subscription)
         hide_subscription_link = settings.should_hide_subscription_link()
 
-        # BlackBird: в меню-переписке после пробного сразу экран подключения
+        # BlackBird: в меню-переписке после пробного сразу экран подключения; если он упал, обычный текст ниже
         if remnawave_user and subscription_link and chat_menu_enabled(db_user):
             from app.bb.connect import trial_intro
 
-            await handle_connect_subscription(
-                callback, db_user, db, bb_intro=await trial_intro(db, db_user, subscription)
-            )
-            logger.info('✅ Активирована тестовая подписка для пользователя', telegram_id=db_user.telegram_id)
-            return
+            try:
+                await handle_connect_subscription(
+                    callback, db_user, db, bb_intro=await trial_intro(db, db_user, subscription)
+                )
+                logger.info('✅ Активирована тестовая подписка для пользователя', telegram_id=db_user.telegram_id)
+                return
+            except Exception:
+                logger.exception(
+                    'BlackBird: экран подключения после пробного не показан', telegram_id=db_user.telegram_id
+                )
 
         payment_note = ''
         if charged_amount > 0:

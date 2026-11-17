@@ -337,9 +337,7 @@ async def test_render_hooks_untouched_when_off(monkeypatch):
     callback.bot.edit_message_text.assert_not_awaited()
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize('mode', ['all', 'off'])
-async def test_trial_activation_lands_on_connect(monkeypatch, mode):
+async def _activate_trial(monkeypatch, mode, connect):
     from app.handlers.subscription import purchase
 
     monkeypatch.setattr(settings, 'BB_CHAT_MENU', mode)
@@ -357,7 +355,6 @@ async def test_trial_activation_lands_on_connect(monkeypatch, mode):
     user.id = 42
     user.telegram_id = 7
     db = AsyncMock(spec=AsyncSession)
-    connect = AsyncMock()
     service = MagicMock()
     service.return_value.create_remnawave_user = AsyncMock(return_value=MagicMock())
     notifications = MagicMock()
@@ -379,6 +376,14 @@ async def test_trial_activation_lands_on_connect(monkeypatch, mode):
         patch('app.bb.connect.trial_intro', new=AsyncMock(return_value='INTRO')),
     ):
         await purchase.activate_trial(callback, user, db)
+    return callback, user, db
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['all', 'off'])
+async def test_trial_activation_lands_on_connect(monkeypatch, mode):
+    connect = AsyncMock()
+    callback, user, db = await _activate_trial(monkeypatch, mode, connect)
 
     if mode == 'all':
         connect.assert_awaited_once_with(callback, user, db, bb_intro='INTRO')
@@ -386,6 +391,21 @@ async def test_trial_activation_lands_on_connect(monkeypatch, mode):
     else:
         connect.assert_not_awaited()
         callback.message.edit_text.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_trial_connect_error_falls_back_to_success_text(monkeypatch):
+    """Экран подключения упал после выдачи пробного: не «ошибка активации», а обычный текст Bedolaga об успехе."""
+    from app.localization.texts import get_texts
+
+    connect = AsyncMock(side_effect=RuntimeError('panel down'))
+    callback, _, _ = await _activate_trial(monkeypatch, 'all', connect)
+
+    connect.assert_awaited_once()
+    callback.message.edit_text.assert_awaited_once()
+    text = callback.message.edit_text.await_args.args[0]
+    assert text.startswith(get_texts('ru').TRIAL_ACTIVATED)
+    assert text != get_texts('ru').ERROR
 
 
 def test_no_em_dash_in_texts():
