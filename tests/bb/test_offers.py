@@ -96,6 +96,7 @@ class GuestKey:
         self.requests = []
         self.register_status = 204
         self.claim_reply = (200, {'state': 'pending'})
+        self.claim_delay = 0.0  # guest-key долго спрашивает кабинет и шлёт сообщения
         self.server = None
 
     def _record(self, request, body):
@@ -125,6 +126,7 @@ class GuestKey:
     async def claim(self, request):
         body = await request.json()
         self._record(request, body)
+        await asyncio.sleep(self.claim_delay)
         status, reply = self.claim_reply
         if status == 200:
             self.offers = [dict(o, state=reply['state']) for o in self.offers if o['id'] == body['id']]
@@ -220,7 +222,7 @@ def test_texts_have_no_em_dash():
     from app.bb.texts import TEXTS
 
     for language in ('ru', 'en'):
-        for key in ('btn_offer', 'offer_pending', 'offer_gone'):
+        for key in ('btn_offer', 'offer_pending', 'offer_gone', 'offer_retry'):
             assert '—' not in TEXTS[language][key]
 
 
@@ -293,12 +295,81 @@ async def test_claim_of_gone_offer_answers_and_rerenders(env, monkeypatch):
         kwargs = callback.bot.edit_message_text.await_args.kwargs
         assert all(not cb.startswith('bb_offer') for row in _callbacks(kwargs['reply_markup']) for cb in row)
 
-        # Решение уже принято (409 decided): тот же короткий ответ.
+        # Решение уже принято (409 decided) или предложения нет (404 not_found): тот же короткий ответ.
+        for reply in ((409, {'error': 'decided'}), (404, {'error': 'not_found'})):
+            server.offers = [dict(OPEN)]
+            server.claim_reply = reply
+            callback = _menu_callback(offers.offer_callback(OFFER_ID))
+            await main_menu.on_offer(callback, user, MagicMock())
+            callback.answer.assert_awaited_once_with('Предложение больше не доступно')
+
+
+def _has_offer_button(markup) -> bool:
+    return _callbacks(markup)[0] == [offers.offer_callback(OFFER_ID)]
+
+
+async def test_claim_failure_says_try_again_and_keeps_button(env, monkeypatch):
+    """Сбой связи при нажатии не «предложение пропало»: guest-key мог и выполнить нажатие (MCKSP: человек уже
+    в группе). Ответ «Не получилось, попробуйте ещё раз», кнопка остаётся, кэш не пустеет."""
+    monkeypatch.setattr(main_menu, 'maybe_send_bb_keyboard_once', AsyncMock())
+    monkeypatch.setattr(offers, 'CLAIM_TIMEOUT', 0.2)
+    user = _user(subscription=None)
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        cases = [
+            ('timeout', (200, {'state': 'member'}), 0.6),
+            ('5xx', (500, {'error': 'internal'}), 0),
+            ('unparseable', (200, {'oops': 1}), 0),
+            ('401', (401, {'error': 'unauthorized'}), 0),
+        ]
+        for name, reply, delay in cases:
+            server.offers = [dict(OPEN)]
+            server.claim_reply, server.claim_delay = reply, delay
+            callback = _menu_callback(offers.offer_callback(OFFER_ID))
+            await main_menu.on_offer(callback, user, MagicMock())
+            assert server.calls('POST', '/invite/offers/claim'), name
+            callback.answer.assert_awaited_once_with('Не получилось, попробуйте ещё раз')
+            kwargs = callback.bot.edit_message_text.await_args.kwargs
+            assert _has_offer_button(kwargs['reply_markup']), name
+            assert offers._offers_cache[7][1] == [OPEN], name
+        await asyncio.sleep(0.5)  # медленный claim дорабатывает на сервере
+
+    callback = _menu_callback(offers.offer_callback(OFFER_ID))
+    await main_menu.on_offer(callback, _user(language='en', subscription=None), MagicMock())
+    callback.answer.assert_awaited_once_with('Something went wrong, please try again')
+
+
+async def test_click_when_guest_key_unreachable_keeps_cached_offer(env, monkeypatch):
+    """Свежий запрос при нажатии не прошёл (порт закрыт): «попробуйте ещё раз», открытое предложение из кэша
+    остаётся и в кэше, и в меню; сбой ничего не запоминает."""
+    monkeypatch.setattr(main_menu, 'maybe_send_bb_keyboard_once', AsyncMock())
+    user = _user(subscription=None)
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
         server.offers = [dict(OPEN)]
-        server.claim_reply = (409, {'error': 'decided'})
-        callback = _menu_callback(offers.offer_callback(OFFER_ID))
-        await main_menu.on_offer(callback, user, MagicMock())
-        callback.answer.assert_awaited_once_with('Предложение больше не доступно')
+        await main_menu.build_bb_main_menu(user, MagicMock())
+    entry = offers._offers_cache[7]
+
+    probe = await asyncio.start_server(lambda r, w: None, '127.0.0.1', 0)
+    closed_port = probe.sockets[0].getsockname()[1]
+    probe.close()
+    await probe.wait_closed()
+    monkeypatch.setattr(settings, 'BB_OFFERS_URL', f'http://127.0.0.1:{closed_port}/invite/offers')
+
+    callback = _menu_callback(offers.offer_callback(OFFER_ID))
+    await main_menu.on_offer(callback, user, MagicMock())
+    callback.answer.assert_awaited_once_with('Не получилось, попробуйте ещё раз')
+    assert _has_offer_button(callback.bot.edit_message_text.await_args.kwargs['reply_markup'])
+    assert offers._offers_cache[7] is entry
+
+    # Минута прошла, guest-key всё ещё недоступен: меню показывает последний известный ответ, кэш не трогает.
+    stale = (time.monotonic() - 1, entry[1])
+    offers._offers_cache[7] = stale
+    callback = _menu_callback(offers.offer_callback(OFFER_ID))
+    await main_menu.on_offer(callback, user, MagicMock())
+    callback.answer.assert_awaited_once_with('Не получилось, попробуйте ещё раз')
+    assert _has_offer_button(callback.bot.edit_message_text.await_args.kwargs['reply_markup'])
+    assert offers._offers_cache[7] is stale
 
 
 async def test_offers_cached_for_a_minute_and_dropped_by_claim(env, monkeypatch):
@@ -369,10 +440,8 @@ async def test_guest_key_down_menu_without_offer_under_2s(env, monkeypatch):
     assert text.startswith('Подписка Pro до ')
     assert all(not cb.startswith('bb_offer') for row in _callbacks(kb) for cb in row)
 
-    # Ошибка запомнена на минуту: следующее меню сразу, без нового ожидания.
-    started = time.monotonic()
-    await main_menu.build_bb_main_menu(user, AsyncMock())
-    assert time.monotonic() - started < 0.5
+    # Сбой ничего не запоминает: следующее меню снова спросит guest-key.
+    assert offers._offers_cache == {}
 
 
 async def test_bad_answers_give_no_offers(env, monkeypatch):
@@ -404,6 +473,8 @@ async def test_bad_answers_give_no_offers(env, monkeypatch):
             monkeypatch.setattr(settings, 'BB_OFFERS_URL', str(server.make_url('/invite/offers')))
             offers._offers_cache.clear()
             assert await offers.fetch_offers(_user()) == expected
+            # Ошибочный ответ не запоминается, разобранный запоминается.
+            assert (7 in offers._offers_cache) == bool(expected)
         finally:
             await server.close()
 

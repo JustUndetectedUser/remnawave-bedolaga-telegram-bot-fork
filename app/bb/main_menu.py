@@ -348,20 +348,23 @@ async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
         return
     language = getattr(db_user, 'language', None) or 'ru'
     wanted = (callback.data or '').removeprefix(bb_offers.CALLBACK_PREFIX)
-    offers = await bb_offers.fetch_offers(db_user, fresh=True)
-    offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
-    if offer is None:
-        await callback.answer(bb_text(language, 'offer_gone'))
-    elif offer['state'] == 'pending':
-        await callback.answer(bb_text(language, 'offer_pending'))
-    else:
-        state = await bb_offers.claim_offer(db_user, offer['id'])
-        if state is None:
-            await callback.answer(bb_text(language, 'offer_gone'))
-        elif state == 'pending':
-            await callback.answer(bb_text(language, 'offer_pending'))
+    try:
+        offers = await bb_offers.load_offers(db_user)
+        offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
+        if offer is None:
+            key = 'offer_gone'
+        elif offer['state'] == 'pending':
+            key = 'offer_pending'
         else:
-            await callback.answer()
+            state = await bb_offers.claim_offer(db_user, offer['id'])
+            key = 'offer_gone' if state is None else 'offer_pending' if state == 'pending' else None
+    except bb_offers.Unavailable:
+        # Сбой связи не «предложение пропало»: кнопка остаётся (кэш не тронут), человек нажмёт ещё раз.
+        key = 'offer_retry'
+    if key:
+        await callback.answer(bb_text(language, key))
+    else:
+        await callback.answer()
     await bb_edit_main_menu(callback, db_user, db)
 
 

@@ -12,6 +12,10 @@ guest-key: внутренний адрес BB_OFFERS_URL (http://guest-key:8091/
   POST {url}/claim     {"id"}   -> 200 {"state": "pending" | "member" | "granted"}; 404 not_found; 409 decided
 Сообщения админам и приветствие группы шлёт сам guest-key, бот своих не пишет. Пустой BB_OFFERS_URL: механизма нет,
 ни одного запроса.
+
+Сбой связи (таймаут, нет соединения, 5xx, неожиданный ответ) не значит «предложения нет»: при нажатии это
+Unavailable («попробуйте ещё раз», кнопка остаётся), и кэш он не трогает. «Предложения нет» говорят только 404/409
+и успешный GET без него.
 """
 
 import hashlib
@@ -43,6 +47,10 @@ _CACHE_LIMIT = 4096
 
 # telegram_id -> (до какого момента time.monotonic() верить, предложения)
 _offers_cache: dict[int, tuple[float, list[dict]]] = {}
+
+
+class Unavailable(Exception):
+    """guest-key не ответил или ответил не по договору; о самих предложениях это ничего не говорит."""
 
 
 def offer_code(payload: str | None) -> str | None:
@@ -101,10 +109,13 @@ async def _request(
         return response.status, body
 
 
-def _parse(body: Any) -> list[dict]:
+def _parse(body: Any) -> list[dict] | None:
+    """None: ответ не по договору (нет списка offers). Непонятные элементы списка пропускаются."""
     items = body.get('offers') if isinstance(body, dict) else None
+    if not isinstance(items, list):
+        return None
     offers = []
-    for item in items if isinstance(items, list) else ():
+    for item in items:
         if not isinstance(item, dict):
             continue
         offer_id, state = item.get('id'), item.get('state')
@@ -125,32 +136,43 @@ def _ready(user) -> bool:
     return bool(_url()) and bool(getattr(user, 'telegram_id', None)) and getattr(user, 'id', None) is not None
 
 
-async def fetch_offers(user, *, fresh: bool = False) -> list[dict]:
-    """Предложения человека. Ошибка, таймаут, не 200: [] и строка в лог (меню без строки, не падает).
+async def load_offers(user) -> list[dict]:
+    """Предложения человека мимо кэша (нажатие кнопки). Успешный ответ запоминается на CACHE_TTL.
 
-    Ответ, и пустой после ошибки тоже, живёт CACHE_TTL: меню не ждёт упавший сервер на каждом показе.
-    fresh: мимо кэша (нажатие кнопки).
+    Unavailable: сбой связи или ответ не по договору; кэш при этом не меняется.
     """
     if not _ready(user):
         return []
-    telegram_id = user.telegram_id
-    if not fresh:
-        cached = _offers_cache.get(telegram_id)
-        if cached and cached[0] > time.monotonic():
-            return list(cached[1])
-    offers: list[dict] = []
     try:
         status, body = await _request('GET', _url(), user)
-        if status == 200:
-            offers = _parse(body)
-        else:
-            logger.warning(
-                'BlackBird: guest-key не отдал предложения', status=status, error=_error_code(body), user_id=user.id
-            )
     except Exception as error:
-        logger.warning('BlackBird: guest-key недоступен, меню без предложений', error=repr(error), user_id=user.id)
-    _remember(telegram_id, offers)
+        logger.warning('BlackBird: guest-key недоступен, предложения не получены', error=repr(error), user_id=user.id)
+        raise Unavailable from error
+    offers = _parse(body) if status == 200 else None
+    if offers is None:
+        logger.warning(
+            'BlackBird: guest-key не отдал предложения', status=status, error=_error_code(body), user_id=user.id
+        )
+        raise Unavailable(f'GET {status}')
+    _remember(user.telegram_id, offers)
     return list(offers)
+
+
+async def fetch_offers(user) -> list[dict]:
+    """Предложения для меню: из кэша (CACHE_TTL), иначе с сервера. Таймаут TIMEOUT, исключений нет.
+
+    Сбой ничего не запоминает: меню получает последний известный ответ этого человека, а если его нет, [] (меню
+    без строки).
+    """
+    if not _ready(user):
+        return []
+    cached = _offers_cache.get(user.telegram_id)
+    if cached and cached[0] > time.monotonic():
+        return list(cached[1])
+    try:
+        return await load_offers(user)
+    except Unavailable:
+        return list(cached[1]) if cached else []
 
 
 async def register_offer(user, code: str) -> None:
@@ -186,21 +208,29 @@ async def _register(user, code: str) -> bool:
 
 
 async def claim_offer(user, offer_id: str) -> str | None:
-    """Нажатие «Вам доступен уникальный тариф»: pending, member или granted; None, если не вышло."""
+    """Нажатие «Вам доступен уникальный тариф»: pending, member или granted; None: предложения нет (404, 409).
+
+    Unavailable: сбой связи или ответ не по договору. guest-key мог нажатие и выполнить, поэтому кэш остаётся,
+    а правду покажет следующий запрос.
+    """
     if not _ready(user):
         return None
     try:
         status, body = await _request('POST', f'{_url()}/claim', user, {'id': offer_id}, timeout=CLAIM_TIMEOUT)
-        state = body.get('state') if isinstance(body, dict) else None
-        if status == 200 and isinstance(state, str) and state:
-            logger.info('BlackBird: предложение нажато', state=state, user_id=user.id)
-            return state
-        logger.info('BlackBird: предложение не принято', status=status, error=_error_code(body), user_id=user.id)
     except Exception as error:
         logger.warning('BlackBird: guest-key недоступен, нажатие не дошло', error=repr(error), user_id=user.id)
-    finally:
+        raise Unavailable from error
+    state = body.get('state') if isinstance(body, dict) else None
+    if status == 200 and isinstance(state, str) and state:
         _forget(user)
-    return None
+        logger.info('BlackBird: предложение нажато', state=state, user_id=user.id)
+        return state
+    if status in {404, 409}:
+        _forget(user)
+        logger.info('BlackBird: предложение не принято', status=status, error=_error_code(body), user_id=user.id)
+        return None
+    logger.warning('BlackBird: guest-key не принял нажатие', status=status, error=_error_code(body), user_id=user.id)
+    raise Unavailable(f'claim {status}')
 
 
 async def stash_start_payload(telegram_id: int | None, payload: str | None) -> bool:
