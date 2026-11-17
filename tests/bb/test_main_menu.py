@@ -186,7 +186,7 @@ def _tariffs_db_rows():
             description='Max text',
             is_highlighted=False,
             is_trial_available=False,
-            period_prices={'30': 50000},
+            period_prices={'30': 50000, '90': 135000},
             device_limit=12,
         ),
         _tariff(
@@ -269,12 +269,29 @@ async def test_tariffs_message_is_new_message(monkeypatch):
     kb = kwargs['reply_markup']
     assert kwargs['parse_mode'] == 'HTML'
     assert _labels(kb) == [['Lite'], ['Base'], ['⭐ Pro'], ['Max']]
-    assert _callbacks(kb) == [['tariff_select:1'], ['tariff_select:2'], ['tariff_select:3'], ['tariff_select:4']]
+    # Один период: сразу подтверждение Bedolaga (tariff_period), без экрана с одной кнопкой. Два периода: выбор.
+    assert _callbacks(kb) == [
+        ['tariff_period:1:30'],
+        ['tariff_period:2:30'],
+        ['tariff_period:3:30'],
+        ['tariff_select:4'],
+    ]
     assert text.count('самый популярный') == 1
     assert text.index('Lite text') < text.index('Base text') < text.index('Pro text') < text.index('Max text')
     assert '350 ₽' in text and '8 устройств' in text
     assert 'TRIAL PRO' not in text and 'Unlimited' not in text
     assert '<b>Lite</b>' in text and '<b>Pro</b>' in text and 'LITE' not in text and 'PRO' not in text
+
+
+def test_single_period_with_custom_options_keeps_selection():
+    """Свои дни или трафик и суточный тариф: экран Bedolaga после tariff_select нужен, его не пропускаем."""
+    rows = [
+        _tariff('LITE', None, 1, period_prices={'30': 10000}, device_limit=2, can_purchase_custom_days=lambda: True),
+        _tariff('BASE', None, 2, period_prices={'30': 20000}, device_limit=4, can_purchase_custom_traffic=lambda: True),
+        _tariff('PRO', None, 3, period_prices={'30': 35000}, device_limit=8, is_daily=True),
+    ]
+    _, kb = tariffs.tariffs_message(rows, 'ru')
+    assert _callbacks(kb) == [['tariff_select:1'], ['tariff_select:2'], ['tariff_select:3']]
 
 
 @pytest.mark.asyncio

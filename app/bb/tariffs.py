@@ -1,4 +1,4 @@
-"""«Платные тарифы»: новым сообщением, кнопки ведут в покупку Bedolaga (tariff_select:<id>)."""
+"""«Платные тарифы»: новым сообщением, кнопки ведут в покупку Bedolaga (tariff_select или tariff_period)."""
 
 import html
 
@@ -35,6 +35,27 @@ def _shortest_price(tariff) -> tuple[int, int] | None:
     return min(prices) if prices else None
 
 
+def _has_custom_options(tariff) -> bool:
+    """Свои дни или трафик: после tariff_select у Bedolaga свой экран, его не пропускаем."""
+    for name in ('can_purchase_custom_days', 'can_purchase_custom_traffic'):
+        check = getattr(tariff, name, None)
+        if callable(check) and check():
+            return True
+    return False
+
+
+def select_callback(tariff) -> str:
+    """Один период у тарифа: сразу подтверждение покупки Bedolaga (tariff_period:<id>:<дни>), без экрана
+    выбора периода с одной кнопкой. Иначе выбор Bedolaga (tariff_select:<id>)."""
+    periods = list((getattr(tariff, 'period_prices', None) or {}).keys())
+    if len(periods) == 1 and not getattr(tariff, 'is_daily', False) and not _has_custom_options(tariff):
+        try:
+            return f'tariff_period:{tariff.id}:{int(periods[0])}'
+        except (TypeError, ValueError):
+            pass
+    return f'tariff_select:{tariff.id}'
+
+
 def tariffs_message(tariffs, language: str) -> tuple[str, InlineKeyboardMarkup | None]:
     lines = [bb_text(language, 'tariffs_title')]
     buttons = []
@@ -61,7 +82,7 @@ def tariffs_message(tariffs, language: str) -> tuple[str, InlineKeyboardMarkup |
             [
                 InlineKeyboardButton(
                     text=f'{STAR if highlighted else ""}{display_name(tariff.name)}',
-                    callback_data=f'tariff_select:{tariff.id}',
+                    callback_data=select_callback(tariff),
                 )
             ]
         )
