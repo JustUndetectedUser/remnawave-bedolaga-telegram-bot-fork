@@ -1118,7 +1118,11 @@ async def activate_trial(callback: types.CallbackQuery, db_user: User, db: Async
 
         # BlackBird: в меню-переписке после пробного сразу экран подключения
         if remnawave_user and subscription_link and chat_menu_enabled(db_user):
-            await handle_connect_subscription(callback, db_user, db)
+            from app.bb.connect import trial_intro
+
+            await handle_connect_subscription(
+                callback, db_user, db, bb_intro=await trial_intro(db, db_user, subscription)
+            )
             logger.info('✅ Активирована тестовая подписка для пользователя', telegram_id=db_user.telegram_id)
             return
 

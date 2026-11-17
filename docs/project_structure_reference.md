@@ -123,6 +123,9 @@
 - `app/bb/__init__.py` — Python-модуль
   Классы: нет
   Функции: нет
+- `app/bb/connect.py` — Python-модуль
+  Классы: нет
+  Функции: `happ_open_url`, `bb_connect_screen`, `fetch_devices_used` — Сколько устройств в списке HWID панели; при ошибке или таймауте None (строка не показывается)., `trial_intro` — «✅ Pro на 3 дня, до 19 ноября. Осталось подключить устройство.» для экрана после пробного., `show_connect`, `install_links` — (ключ подписи, ссылка) только для заданных ссылок., `bb_install_screen`, `on_install`, `register_handlers`
 - `app/bb/entry.py` — Python-модуль
   Классы: нет
   Функции: `bb_reply_keyboard`, `send_bb_keyboard` — Короткое сообщение с клавиатурой и сброс кнопки слева для чата. Ошибки только в лог., `maybe_send_bb_keyboard`, `on_bot_button`, `on_cabinet_button`, `register_handlers` — Все хендлеры app.bb (bot.py зовёт только эту функцию).
@@ -3355,6 +3358,9 @@
 - `tests/bb/__init__.py` — Python-модуль
   Классы: нет
   Функции: нет
+- `tests/bb/test_connect.py` — Python-модуль
+  Классы: нет
+  Функции: `test_connect_buttons_order`, `test_connect_english_and_no_devices_line`, `test_no_redirect_url_hides_open_button`, `test_copy_button_has_link`, `test_link_over_256_chars_shown_as_text`, `test_no_link_no_crash`, `test_intro_goes_first`, `test_trial_intro`, `test_install_skips_empty_links`, `test_install_layout_three_per_row`, `test_fetch_devices_failure_and_timeout`, `test_trial_intro_failure_is_none`, `test_handle_connect_uses_bb_screen_when_menu_on`
 - `tests/bb/test_entry.py` — Python-модуль
   Классы: нет
   Функции: `test_rollout_off_admins_all`, `test_reply_keyboard_layout`, `enabled`, `test_bot_button_clears_state_and_shows_menu`, `test_cabinet_button_sends_webapp_button`, `test_buttons_ignored_when_disabled`, `test_send_bb_keyboard_never_raises`, `test_dispatcher_bot_button_beats_fsm_and_catch_all`, `test_dispatcher_disabled_falls_through_to_state_handler`

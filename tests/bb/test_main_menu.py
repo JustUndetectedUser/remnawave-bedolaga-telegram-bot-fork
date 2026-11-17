@@ -374,11 +374,12 @@ async def test_trial_activation_lands_on_connect(monkeypatch, mode):
         patch.object(purchase, 'AdminNotificationService', new=notifications),
         patch.object(purchase, 'get_display_subscription_link', return_value='https://sub.example/abc'),
         patch.object(purchase, 'handle_connect_subscription', new=connect),
+        patch('app.bb.connect.trial_intro', new=AsyncMock(return_value='INTRO')),
     ):
         await purchase.activate_trial(callback, user, db)
 
     if mode == 'all':
-        connect.assert_awaited_once_with(callback, user, db)
+        connect.assert_awaited_once_with(callback, user, db, bb_intro='INTRO')
         callback.message.edit_text.assert_not_awaited()
     else:
         connect.assert_not_awaited()

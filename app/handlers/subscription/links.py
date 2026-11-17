@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import InaccessibleMessage, InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb.rollout import chat_menu_enabled  # BlackBird
 from app.config import settings
 from app.database.models import User
 from app.keyboards.inline import (
@@ -29,7 +30,11 @@ async def _resolve_subscription(callback: types.CallbackQuery, db_user: User, db
 
 
 async def handle_connect_subscription(
-    callback: types.CallbackQuery, db_user: User, db: AsyncSession, state: FSMContext = None
+    callback: types.CallbackQuery,
+    db_user: User,
+    db: AsyncSession,
+    state: FSMContext = None,
+    bb_intro: str | None = None,  # BlackBird: строка над экраном подключения (после пробного)
 ):
     # Проверяем, доступно ли сообщение для редактирования
     if isinstance(callback.message, InaccessibleMessage):
@@ -73,6 +78,12 @@ async def handle_connect_subscription(
 
     subscription, sub_id = await _resolve_subscription(callback, db_user, db, state)
     if subscription is None:
+        return
+    # BlackBird: экран подключения меню в переписке
+    if chat_menu_enabled(db_user):
+        from app.bb.connect import show_connect
+
+        await show_connect(callback, db_user, subscription, intro=bb_intro)
         return
     subscription_link = get_display_subscription_link(subscription)
     hide_subscription_link = settings.should_hide_subscription_link()

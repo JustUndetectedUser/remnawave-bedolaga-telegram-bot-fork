@@ -46,6 +46,28 @@ TEXTS = {
         'btn_back': '← Назад',
         'renew_topup_short': 'Пополнение получено, но для продления не хватает ещё {missing}.',
         'purchase_topup_short': 'Пополнение получено, но для покупки тарифа не хватает ещё {missing}.',
+        # Подключение устройства
+        'connect_text': (
+            '<b>Подключение устройства</b>\n1. Установите Happ\n'
+            '2. Нажмите «Открыть в Happ», подписка добавится сама.\n3. Включите VPN в Happ'
+        ),
+        'connect_devices': 'Устройств подключено: {used} из {limit}',
+        'connect_trial_intro': '✅ Pro на {days}, до {date}. Осталось подключить устройство.',
+        'connect_link_text': 'Ссылка на подписку:',
+        'connect_no_link': 'Ссылка ещё готовится, попробуйте через минуту.',
+        'btn_open_happ': '📲 Открыть в Happ',
+        'btn_copy_link': '📋 Скопировать ссылку',
+        'btn_install_happ': '⬇️ Установить Happ',
+        'install_text': (
+            '<b>Установите Happ</b>\nВыберите своё устройство. '
+            'После установки вернитесь сюда и нажмите «Открыть в Happ».'
+        ),
+        'btn_ios': 'iPhone',
+        'btn_android': 'Android',
+        'btn_windows': 'Windows',
+        'btn_macos': 'Mac',
+        'btn_tv': 'Телевизор',
+        'btn_apk': 'APK',
     },
     'en': {
         'btn_bot': 'Open bot menu',
@@ -89,6 +111,27 @@ TEXTS = {
         'btn_back': '← Back',
         'renew_topup_short': 'Top-up received, but {missing} more is needed to renew.',
         'purchase_topup_short': 'Top-up received, but {missing} more is needed to buy the plan.',
+        # Connect a device
+        'connect_text': (
+            '<b>Connect a device</b>\n1. Install Happ\n'
+            '2. Tap «Open in Happ», the subscription is added automatically.\n3. Turn on the VPN in Happ'
+        ),
+        'connect_devices': 'Devices connected: {used} of {limit}',
+        'connect_trial_intro': '✅ Pro for {days}, until {date}. Now connect a device.',
+        'connect_link_text': 'Subscription link:',
+        'connect_no_link': 'The link is not ready yet, try again in a minute.',
+        'btn_open_happ': '📲 Open in Happ',
+        'btn_copy_link': '📋 Copy link',
+        'btn_install_happ': '⬇️ Install Happ',
+        'install_text': (
+            '<b>Install Happ</b>\nChoose your device. After installing, come back here and tap «Open in Happ».'
+        ),
+        'btn_ios': 'iPhone',
+        'btn_android': 'Android',
+        'btn_windows': 'Windows',
+        'btn_macos': 'Mac',
+        'btn_tv': 'TV',
+        'btn_apk': 'APK',
     },
 }
 
