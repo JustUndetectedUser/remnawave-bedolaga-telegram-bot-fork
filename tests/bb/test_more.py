@@ -24,8 +24,9 @@ def _callback():
     return callback
 
 
-async def _render(monkeypatch, user):
+async def _render(monkeypatch, user, language_selection=True):
     monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'all')
+    monkeypatch.setattr(settings, 'LANGUAGE_SELECTION_ENABLED', language_selection)
     callback = _callback()
     await more.on_more(callback, user, MagicMock())
     callback.message.edit_text.assert_awaited_once()
@@ -45,6 +46,7 @@ async def test_more_buttons_exact(monkeypatch):
         [('📜 История', 'balance_history')],
         [('💬 Поддержка', 'menu_support')],
         [('❓ Вопросы и ответы', 'menu_faq')],
+        [('🌐 Язык', 'menu_language')],
         [('← Назад', 'back_to_menu')],
     ]
 
@@ -59,6 +61,7 @@ async def test_more_buttons_english(monkeypatch):
         '📜 History',
         '💬 Support',
         '❓ FAQ',
+        '🌐 Language',
         '← Back',
     ]
 
@@ -66,7 +69,20 @@ async def test_more_buttons_english(monkeypatch):
 @pytest.mark.asyncio
 async def test_more_without_subscription_hides_subscription_screens(monkeypatch):
     _, rows = await _render(monkeypatch, _user(subscription=False))
-    assert [data for [(_, data)] in rows] == ['balance_history', 'menu_support', 'menu_faq', 'back_to_menu']
+    assert [data for [(_, data)] in rows] == [
+        'balance_history',
+        'menu_support',
+        'menu_faq',
+        'menu_language',
+        'back_to_menu',
+    ]
+
+
+@pytest.mark.asyncio
+async def test_more_hides_language_when_selection_disabled(monkeypatch):
+    # Экран смены языка Bedolaga не открывается при LANGUAGE_SELECTION_ENABLED=false — кнопку не показываем
+    _, rows = await _render(monkeypatch, _user(), language_selection=False)
+    assert 'menu_language' not in [data for [(_, data)] in rows]
 
 
 @pytest.mark.asyncio

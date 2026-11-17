@@ -52,6 +52,7 @@ TEXTS = {
         'btn_history': '📜 История',
         'btn_support': '💬 Поддержка',
         'btn_faq': '❓ Вопросы и ответы',
+        'btn_language': '🌐 Язык',
         'renew_topup_short': 'Пополнение получено, но для продления не хватает ещё {missing}.',
         'purchase_topup_short': 'Пополнение получено, но для покупки тарифа не хватает ещё {missing}.',
         # После оплаты
@@ -135,6 +136,7 @@ TEXTS = {
         'btn_history': '📜 History',
         'btn_support': '💬 Support',
         'btn_faq': '❓ FAQ',
+        'btn_language': '🌐 Language',
         'renew_topup_short': 'Top-up received, but {missing} more is needed to renew.',
         'purchase_topup_short': 'Top-up received, but {missing} more is needed to buy the plan.',
         # After payment

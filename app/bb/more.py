@@ -1,4 +1,4 @@
-"""Экран «Ещё»: устройства, автопродление, история, поддержка, вопросы и ответы.
+"""Экран «Ещё»: устройства, автопродление, история, поддержка, вопросы и ответы, язык.
 
 Каждая кнопка ведёт на готовый экран Bedolaga по его callback_data, своей логики здесь нет. Устройства и
 автопродление работают только с подпиской, поэтому у человека без подписки этих двух кнопок нет.
@@ -12,6 +12,7 @@ from app.bb.main_menu import bb_edit_main_menu
 from app.bb.renew import _show
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import bb_text
+from app.config import settings
 
 
 def more_message(user, language: str) -> tuple[str, InlineKeyboardMarkup]:
@@ -22,8 +23,11 @@ def more_message(user, language: str) -> tuple[str, InlineKeyboardMarkup]:
         ('btn_history', 'balance_history'),
         ('btn_support', 'menu_support'),
         ('btn_faq', 'menu_faq'),
-        ('btn_back', 'back_to_menu'),
     ]
+    # Смена языка: экран Bedolaga, он открывается только при LANGUAGE_SELECTION_ENABLED
+    if settings.is_language_selection_enabled():
+        buttons.append(('btn_language', 'menu_language'))
+    buttons.append(('btn_back', 'back_to_menu'))
     rows = [[InlineKeyboardButton(text=bb_text(language, key), callback_data=data)] for key, data in buttons]
     return bb_text(language, 'more_title'), InlineKeyboardMarkup(inline_keyboard=rows)
 
