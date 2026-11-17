@@ -46,6 +46,8 @@ CLAIM_TIMEOUT = 10.0
 CACHE_TTL = 60  # предложения человека в памяти процесса; запись и нажатие сбрасывают
 CODE_TTL = 24 * 3600  # код из /start offer_<код> ждёт регистрации сутки
 CALLBACK_PREFIX = 'bb_offer:'
+# Кнопка «Подключить» в сообщении после /start offer_<код>: своя, нажатие узнаётся по ней, а не по сообщению
+MESSAGE_CALLBACK_PREFIX = 'bb_offer_msg:'
 WAIT_CALLBACK = 'bb_offer_wait'
 STATES = frozenset({'open', 'pending'})
 
@@ -90,6 +92,11 @@ def offer_hash(offer_id: str) -> str:
 def offer_callback(offer_id: str) -> str:
     """callback_data кнопки: id предложения бывает длиннее 64 байт, поэтому хэш."""
     return CALLBACK_PREFIX + offer_hash(offer_id)
+
+
+def message_callback(offer_id: str) -> str:
+    """callback_data кнопки «Подключить» в сообщении (offer_message): тот же хэш, свой префикс."""
+    return MESSAGE_CALLBACK_PREFIX + offer_hash(offer_id)
 
 
 def _url() -> str:
@@ -324,18 +331,20 @@ async def _tell(bot, user, outcome: Registered) -> None:
 def offer_message(offer: dict, language: str | None) -> tuple[str, InlineKeyboardMarkup | None]:
     """Сообщение о предложении (HTML; название и текст сервера экранированы, как в меню переписки).
 
-    open: «🎁 Вам доступен уникальный тариф», название, текст и кнопка «Подключить» (offer_callback; нажатие
-    в app/bb/main_menu.py, on_offer); pending: «⏳ Заявка на рассмотрении» и название, без кнопки.
+    open: «🎁 Вам доступен уникальный тариф», название, текст и кнопка «Подключить» (message_callback; нажатие
+    в app/bb/main_menu.py, on_offer); pending: «⏳ Заявка на рассмотрении» и название, без кнопки; любое другое
+    (нажатие привело в группу или выдало тариф): «✅ Готово» и название, без кнопки.
     """
     title = html.escape(offer.get('title') or '')
-    if offer.get('state') == 'open':
+    state = offer.get('state')
+    if state == 'open':
         head, body = bb_text(language, 'offer_available'), html.escape(offer.get('text') or '')
         button = InlineKeyboardButton(
-            text=bb_text(language, 'btn_offer_connect'), callback_data=offer_callback(offer['id'])
+            text=bb_text(language, 'btn_offer_connect'), callback_data=message_callback(offer['id'])
         )
         markup = InlineKeyboardMarkup(inline_keyboard=[[button]])
     else:
-        head, body, markup = bb_text(language, 'offer_pending'), '', None
+        head, body, markup = bb_text(language, 'offer_pending' if state == 'pending' else 'offer_done'), '', None
     block = '\n'.join(part for part in (f'<b>{title}</b>' if title else '', body) if part)
     return (f'{head}\n\n{block}' if block else head), markup
 

@@ -98,6 +98,8 @@ class GuestKey:
         self.claim_reply = (200, {'state': 'pending'})
         self.claim_delay = 0.0  # guest-key долго спрашивает кабинет и шлёт сообщения
         self.on_register = [OPEN]  # предложения человека после записи кода (204)
+        # Задан: как настоящий guest-key - код этой группы после записи виден вместо прежнего; заявка важнее
+        self.register_kind = None
         self.list_status = 200  # GET /invite/offers: не 200 - сбой guest-key
         self.server = None
 
@@ -123,7 +125,13 @@ class GuestKey:
         body = await request.json()
         self._record(request, body)
         if self.register_status == 204:
-            self.offers = [dict(offer) for offer in self.on_register]
+            if self.register_kind is None:
+                self.offers = [dict(offer) for offer in self.on_register]
+            else:
+                same = [o for o in self.offers if o['id'].rpartition(':')[0] == self.register_kind]
+                if not any(o['state'] == 'pending' for o in same):
+                    newest = dict(OPEN, id=f'{self.register_kind}:{body["code"]}')
+                    self.offers = [o for o in self.offers if o not in same] + [newest]
             return web.Response(status=204)
         return web.json_response({'error': 'not_found'}, status=self.register_status)
 
@@ -169,6 +177,7 @@ def env(monkeypatch):
     tariff = SimpleNamespace(id=3, name='PRO', panel_tag='PAID_PRO')
     monkeypatch.setattr(main_menu, 'get_tariff_by_id', AsyncMock(return_value=tariff))
     monkeypatch.setattr(offers, 'cache', fake)
+    monkeypatch.setattr(main_menu, '_pressed_done', {}, raising=False)
     offers._offers_cache.clear()
     yield fake
     offers._offers_cache.clear()
@@ -235,6 +244,7 @@ def test_texts_have_no_em_dash():
             'offer_dead',
             'offer_available',
             'btn_offer_connect',
+            'offer_done',
         ):
             assert '—' not in TEXTS[language][key]
 
@@ -715,6 +725,11 @@ def test_after_start_hooks_in_registration_paths():
         assert source.index(f'await bb_offers.after_start(existing_user, {bot})') < source.index(
             'await maybe_send_bb_keyboard('
         )
+        # Уже активный: до try со сборкой меню. Иначе сбой сборки пропустил бы after_start, а send_offer после
+        # меню всё равно бы шёл.
+        assert source.index(f'await bb_offers.after_start(existing_user, {bot})') < source.index(
+            'try:\n            keyboard = await get_main_menu_keyboard_async('
+        )
 
     cmd_start = _source(start.cmd_start)
     assert cmd_start.count('bb_offers.stash_start_payload(') == 1
@@ -790,7 +805,10 @@ async def test_recorded_offer_message_with_connect_button(env, monkeypatch, chat
         assert args == (7, f'{head}\n\n<b>MCKSP &lt;группа&gt; &amp; друзья</b>\nЕщё один сервер')
         assert kwargs['parse_mode'] == 'HTML'
         assert _labels(kwargs['reply_markup']) == [[button]]
-        assert _callbacks(kwargs['reply_markup']) == [[offers.offer_callback(MINE_ID)]]
+        # Своя кнопка сообщения (не кнопка меню переписки), в пределах 64 байт callback_data.
+        assert _callbacks(kwargs['reply_markup']) == [[offers.message_callback(MINE_ID)]]
+        assert offers.message_callback(MINE_ID) == 'bb_offer_msg:' + offers.offer_hash(MINE_ID)
+        assert len(offers.message_callback(OFFER_ID).encode()) <= 64
 
         # Одно сообщение на /start: второй вызов ничего не шлёт и guest-key не спрашивает.
         requests = len(server.requests)
@@ -814,16 +832,47 @@ async def test_pending_offer_message_without_button(env, monkeypatch):
     assert kwargs.get('reply_markup') is None
 
 
-@pytest.mark.parametrize('listed', [[], [OTHER], [OPEN]], ids=['empty', 'other-offer', 'same-group-other-code'])
+@pytest.mark.parametrize('listed', [[], [OTHER]], ids=['empty', 'other-offer'])
 async def test_no_message_when_offer_of_this_code_is_missing(env, monkeypatch, listed):
-    """204, но предложения этой ссылки в списке нет (решение уже было, ссылка умерла, у группы раньше записан
-    другой код): ничего."""
+    """204, но предложения этой ссылки в списке нет (решение уже было, ссылка умерла): ничего."""
     user, bot = _user(), _bot()
     async with GuestKey() as server:
         monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
         server.on_register = listed
         env.data['bb_offer_code:7'] = CODE
         assert await offers.after_start(user, bot) == 'ok'
+        await offers.send_offer(user, bot)
+        assert len(server.calls('GET')) == 1
+    bot.send_message.assert_not_awaited()
+
+
+async def test_newer_code_of_same_group_is_announced(env, monkeypatch):
+    """Человек уже приходил по другой ссылке той же группы (предложение открыто): guest-key показывает самый новый
+    код группы, и сообщение «Подключить» о новой ссылке приходит."""
+    user, bot = _user(), _bot()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.register_kind = 'group:mcksp'
+        server.offers = [dict(OPEN), dict(OTHER)]  # OPEN: прежний код той же группы
+        env.data['bb_offer_code:7'] = CODE
+        assert await offers.after_start(user, bot) == 'ok'
+        assert [o['id'] for o in server.offers] == [OTHER['id'], MINE_ID]
+        await offers.send_offer(user, bot)
+    bot.send_message.assert_awaited_once()
+    assert _callbacks(bot.send_message.await_args.kwargs['reply_markup']) == [[offers.message_callback(MINE_ID)]]
+
+
+async def test_earlier_pending_code_keeps_new_code_silent(env, monkeypatch):
+    """Заявка по прежней ссылке той же группы ждёт админа: guest-key показывает её (заявка важнее открытого
+    нового кода), о новой ссылке бот молчит."""
+    user, bot = _user(), _bot()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.register_kind = 'group:mcksp'
+        server.offers = [dict(OPEN, state='pending')]
+        env.data['bb_offer_code:7'] = CODE
+        assert await offers.after_start(user, bot) == 'ok'
+        assert server.offers == [dict(OPEN, state='pending')]
         await offers.send_offer(user, bot)
         assert len(server.calls('GET')) == 1
     bot.send_message.assert_not_awaited()
@@ -1005,7 +1054,7 @@ def test_offer_message_hooks_after_welcome_or_menu():
 
 
 def _message_callback(markup):
-    """Нажатие «Подключить» в сообщении бота после /start offer_<код>: у сообщения одна кнопка."""
+    """Нажатие «Подключить» в сообщении бота после /start offer_<код> (callback_data кнопки сообщения)."""
     callback = _menu_callback(markup.inline_keyboard[0][0].callback_data)
     callback.message.reply_markup = markup
     callback.message.text = 'сообщение с кнопкой'
@@ -1041,9 +1090,10 @@ async def test_connect_from_message_claims_and_edits_that_message(env, monkeypat
 
 
 async def test_connect_from_message_gone_member_retry(env, monkeypatch):
-    """Предложения уже нет (пропало из списка, 409, 404): «Предложение больше не доступно» вместо текста; сразу
-    в группе (member): кнопка убрана, приветствие шлёт guest-key; сбой связи: «попробуйте ещё раз», сообщение
-    с кнопкой не трогается; Telegram не дал поправить сообщение: без исключений."""
+    """Предложения уже нет (пропало из списка, 409, 404): «Предложение больше не доступно» вместо текста; сбой
+    связи: «попробуйте ещё раз», сообщение с кнопкой не трогается; Telegram не дал поправить сообщение: без
+    исключений; сразу в группе (member) или тариф выдан (granted): «✅ Готово» и название, без кнопки
+    (приветствие шлёт guest-key)."""
     monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'off')
     user = _user()
     _, markup = offers.offer_message(MINE, 'ru')
@@ -1059,13 +1109,6 @@ async def test_connect_from_message_gone_member_retry(env, monkeypatch):
             assert kwargs['text'] == 'Предложение больше не доступно'
             assert kwargs.get('reply_markup') is None
 
-        server.offers, server.claim_reply = [dict(MINE)], (200, {'state': 'member'})
-        callback = _message_callback(markup)
-        await main_menu.on_offer(callback, user, MagicMock())
-        callback.answer.assert_awaited_once_with()
-        callback.bot.edit_message_reply_markup.assert_awaited_once_with(chat_id=7, message_id=99, reply_markup=None)
-        callback.bot.edit_message_text.assert_not_awaited()
-
         server.offers, server.claim_reply = [dict(MINE)], (500, {'error': 'internal'})
         callback = _message_callback(markup)
         await main_menu.on_offer(callback, user, MagicMock())
@@ -1079,10 +1122,75 @@ async def test_connect_from_message_gone_member_retry(env, monkeypatch):
         await main_menu.on_offer(callback, user, MagicMock())
         callback.answer.assert_awaited_once_with('⏳ Заявка на рассмотрении')
 
+        for state, language, done in (
+            ('member', 'ru', '✅ Готово'),
+            ('granted', 'en', '✅ Done'),
+        ):
+            main_menu._pressed_done.clear()
+            server.offers, server.claim_reply = [dict(MINE)], (200, {'state': state})
+            callback = _message_callback(markup)
+            await main_menu.on_offer(callback, _user(language=language), MagicMock())
+            callback.answer.assert_awaited_once_with()
+            kwargs = callback.bot.edit_message_text.await_args.kwargs
+            assert kwargs['text'] == f'{done}\n\n<b>MCKSP &lt;группа&gt; &amp; друзья</b>', state
+            assert kwargs.get('reply_markup') is None
+            callback.bot.edit_message_reply_markup.assert_not_awaited()
+
+
+@pytest.mark.parametrize('chat_menu', ['off', 'admins', 'all'])
+async def test_connect_on_inaccessible_message_still_claims(env, monkeypatch, chat_menu):
+    """Старое или иначе недоступное сообщение: Telegram присылает InaccessibleMessage, без клавиатуры. «Подключить»
+    узнаётся по callback_data: нажатие всё равно заявка с коротким ответом; поправить сообщение нельзя, меню
+    переписки не рисуется."""
+    from aiogram.types import Chat, InaccessibleMessage
+
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', chat_menu)
+    edit_menu = AsyncMock()
+    monkeypatch.setattr(main_menu, 'bb_edit_main_menu', edit_menu)
+    user = _user()
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.offers = [dict(MINE)]
+        callback = _menu_callback(offers.message_callback(MINE_ID))
+        callback.message = InaccessibleMessage(chat=Chat(id=7, type='private'), message_id=99)
+        await main_menu.on_offer(callback, user, MagicMock())
+        assert [c['body'] for c in server.calls('POST', '/invite/offers/claim')] == [{'id': MINE_ID}]
+    callback.answer.assert_awaited_once_with('⏳ Заявка на рассмотрении')
+    callback.bot.edit_message_text.assert_not_awaited()
+    edit_menu.assert_not_awaited()
+
+
+async def test_fast_double_tap_on_auto_approve_group(env, monkeypatch):
+    """Группа с автоодобрением, два быстрых нажатия «Подключить»: одно нажатие у guest-key, у обоих ответ без
+    текста и итог «✅ Готово», не «больше не доступно» (после первого нажатия человека в списке уже нет). Ещё одно
+    нажатие чуть позже (кнопка у Telegram ещё видна): тот же итог, без запросов."""
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'off')
+    user = _user()
+    _, markup = offers.offer_message(MINE, 'ru')
+    done = '✅ Готово\n\n<b>MCKSP &lt;группа&gt; &amp; друзья</b>'
+    async with GuestKey() as server:
+        monkeypatch.setattr(settings, 'BB_OFFERS_URL', server.url)
+        server.offers, server.claim_reply, server.claim_delay = [dict(MINE)], (200, {'state': 'member'}), 0.3
+        first, second = _message_callback(markup), _message_callback(markup)
+        await asyncio.gather(
+            main_menu.on_offer(first, user, MagicMock()), main_menu.on_offer(second, user, MagicMock())
+        )
+        assert len(server.calls('POST', '/invite/offers/claim')) == 1
+        for callback in (first, second):
+            callback.answer.assert_awaited_once_with()
+            assert callback.bot.edit_message_text.await_args.kwargs['text'] == done
+
+        requests = len(server.requests)
+        later = _message_callback(markup)
+        await main_menu.on_offer(later, user, MagicMock())
+        later.answer.assert_awaited_once_with()
+        assert later.bot.edit_message_text.await_args.kwargs['text'] == done
+        assert len(server.requests) == requests
+
 
 async def test_chat_menu_button_keeps_menu_behaviour(env, monkeypatch):
-    """Кнопка в меню переписки (там строк больше одной) как раньше: меню включено - нажатие и меню на месте того же
-    сообщения; меню выключено (старое меню в чате) - только ответ, без запросов."""
+    """Кнопка в меню переписки (bb_offer:) как раньше: меню включено - нажатие и меню на месте того же сообщения;
+    меню выключено (старое меню в чате) - только ответ, без запросов."""
     monkeypatch.setattr(main_menu, 'maybe_send_bb_keyboard_once', AsyncMock())
     user = _user(subscription=None)
     async with GuestKey() as server:
@@ -1126,6 +1234,12 @@ async def test_chat_menu_off_no_row(env, monkeypatch):
     callback.answer.assert_awaited_once_with()
     callback.bot.edit_message_text.assert_not_awaited()
 
+    # Нажатие без пользователя в базе (db_user None): только ответ, без исключений.
+    callback = _menu_callback(offers.message_callback(OFFER_ID))
+    await main_menu.on_offer(callback, None, MagicMock())
+    callback.answer.assert_awaited_once_with()
+    callback.bot.edit_message_text.assert_not_awaited()
+
 
 async def test_empty_offers_url_no_calls(env, monkeypatch):
     def no_http(*args, **kwargs):
@@ -1144,8 +1258,9 @@ async def test_empty_offers_url_no_calls(env, monkeypatch):
     assert all(not cb.startswith('bb_offer') for row in _callbacks(kb) for cb in row)
 
 
-def test_handlers_registered():
+async def test_handlers_registered():
     from aiogram import Dispatcher
+    from aiogram.types import CallbackQuery, User
 
     from app.bb import entry
 
@@ -1154,3 +1269,12 @@ def test_handlers_registered():
     callbacks = {handler.callback for handler in dp.callback_query.handlers}
     assert main_menu.on_offer in callbacks
     assert main_menu.on_offer_wait in callbacks
+    # И кнопка меню переписки, и кнопка сообщения «Подключить» доходят до on_offer.
+    handler = next(h for h in dp.callback_query.handlers if h.callback is main_menu.on_offer)
+    person = User(id=7, is_bot=False, first_name='P')
+    for data in (offers.offer_callback(OFFER_ID), offers.message_callback(OFFER_ID)):
+        query = CallbackQuery(id='1', from_user=person, chat_instance='c', data=data)
+        passed, _ = await handler.check(query)
+        assert passed, data
+    query = CallbackQuery(id='1', from_user=person, chat_instance='c', data=offers.WAIT_CALLBACK)
+    assert not (await handler.check(query))[0]

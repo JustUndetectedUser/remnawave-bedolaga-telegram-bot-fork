@@ -8,7 +8,10 @@
 нажатие «Подключить» в сообщении после /start offer_<код> (offers.send_offer), при любом BB_CHAT_MENU.
 """
 
+import asyncio
 import html
+import time
+import weakref
 from collections.abc import Sequence
 from datetime import date, datetime
 
@@ -39,6 +42,14 @@ logger = structlog.get_logger(__name__)
 ENDLESS_TAG = 'ENDLESS_PRO'
 ACTIVE_STATES = frozenset({'active', 'trial', 'limited'})
 NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
+PRESS_MEMORY = 60  # секунды: нажатие уже привело в группу, повторное нажатие получает тот же итог
+
+# telegram_id -> замок: нажатия одного человека идут по очереди (быстрое двойное нажатие). Слабые ссылки: замок
+# живёт, пока его ждут, и не переживает свой цикл событий.
+_press_locks: weakref.WeakValueDictionary[int, asyncio.Lock] = weakref.WeakValueDictionary()
+# (telegram_id, хэш предложения) -> (до какого момента time.monotonic(), предложение): нажатие привело в группу или
+# выдало тариф. В списке guest-key его уже нет, и повторное нажатие без этого сказало бы «больше не доступно».
+_pressed_done: dict[tuple[int, str], tuple[float, dict]] = {}
 
 _MONTHS = {
     'ru': (
@@ -339,30 +350,65 @@ async def bb_edit_main_menu(callback: CallbackQuery, db_user, db: AsyncSession) 
         return False
 
 
-def _is_offer_message(message) -> bool:
-    """Сообщение «Подключить» (offers.offer_message): ровно одна кнопка. В меню переписки строк больше (строка
-    предложения и кнопки меню); клавиатура неизвестна (InaccessibleMessage) - не сообщение."""
-    rows = getattr(getattr(message, 'reply_markup', None), 'inline_keyboard', None)
-    return isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], list) and len(rows[0]) == 1
+def _press_lock(telegram_id: int | None) -> asyncio.Lock:
+    lock = _press_locks.get(telegram_id)
+    if lock is None:
+        lock = _press_locks[telegram_id] = asyncio.Lock()
+    return lock
+
+
+def _remember_done(telegram_id: int, wanted: str, offer: dict) -> None:
+    now = time.monotonic()
+    for key in [key for key, (until, _) in _pressed_done.items() if until <= now]:
+        del _pressed_done[key]
+    _pressed_done[(telegram_id, wanted)] = (now + PRESS_MEMORY, offer)
+
+
+async def _press(db_user, wanted: str) -> tuple[dict | None, str | None]:
+    """Нажатие у guest-key: (предложение, ключ короткого ответа); ключ None - сразу в группе или тариф выдан."""
+    done = _pressed_done.get((db_user.telegram_id, wanted))
+    if done and done[0] > time.monotonic():
+        return done[1], None
+    offer = None
+    try:
+        offers = await bb_offers.load_offers(db_user)
+        offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
+        if offer is None:
+            return None, 'offer_gone'
+        if offer['state'] == 'pending':
+            return offer, 'offer_pending'
+        state = await bb_offers.claim_offer(db_user, offer['id'])
+    except bb_offers.Unavailable:
+        # Сбой связи не «предложение пропало»: кнопка остаётся (кэш не тронут), человек нажмёт ещё раз.
+        return offer, 'offer_retry'
+    if state is None:
+        return offer, 'offer_gone'
+    if state == 'pending':
+        return offer, 'offer_pending'
+    _remember_done(db_user.telegram_id, wanted, offer)
+    return offer, None
 
 
 async def _edit_offer_message(callback: CallbackQuery, offer: dict | None, key: str | None, language: str) -> None:
     """Сообщение «Подключить» после нажатия, без кнопки: заявка ждёт - «Заявка на рассмотрении» и название;
-    предложения нет - «Предложение больше не доступно»; сразу в группе (приветствие шлёт guest-key) - только кнопка
-    убрана. Сбой связи: сообщение с кнопкой остаётся, человек нажмёт ещё раз."""
+    предложения нет - «Предложение больше не доступно»; сразу в группе или тариф выдан (приветствие шлёт guest-key) -
+    «Готово» и название. Сбой связи: сообщение с кнопкой остаётся, человек нажмёт ещё раз. Сообщение недоступно
+    (InaccessibleMessage) или Telegram не дал его поправить: только в лог, ответ на нажатие уже ушёл."""
     message, bot = callback.message, callback.bot
     if key == 'offer_retry' or message is None or bot is None or isinstance(message, InaccessibleMessage):
         return
-    target = {'chat_id': message.chat.id, 'message_id': message.message_id}
+    if key == 'offer_gone' or offer is None:
+        text = bb_text(language, 'offer_gone')
+    else:
+        text, _ = bb_offers.offer_message(dict(offer, state='pending' if key == 'offer_pending' else 'done'), language)
     try:
-        if key == 'offer_pending' and offer is not None:
-            text, _ = bb_offers.offer_message(dict(offer, state='pending'), language)
-        elif key == 'offer_gone':
-            text = bb_text(language, 'offer_gone')
-        else:
-            await bot.edit_message_reply_markup(**target, reply_markup=None)
-            return
-        await bot.edit_message_text(**target, text=text, parse_mode='HTML', link_preview_options=NO_PREVIEW)
+        await bot.edit_message_text(
+            chat_id=message.chat.id,
+            message_id=message.message_id,
+            text=text,
+            parse_mode='HTML',
+            link_preview_options=NO_PREVIEW,
+        )
     except Exception as error:
         logger.debug('BlackBird: сообщение о предложении не поправлено', key=key, error=repr(error))
 
@@ -371,41 +417,33 @@ async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
     """Нажатие «Вам доступен уникальный тариф» в меню переписки или «Подключить» в сообщении после /start offer_<код>.
 
     То же, что вход на странице ссылки (заявка или сразу в группе), затем меню или само сообщение (_edit_offer_message).
-    Сообщения админам и приветствие группы шлёт guest-key; здесь только короткий ответ на нажатие. Сообщение работает
-    при любом BB_CHAT_MENU; кнопка в меню переписки, когда меню выключено (старое меню в чате): только ответ.
+    Сообщения админам и приветствие группы шлёт guest-key; здесь только короткий ответ на нажатие. Кнопка сообщения
+    (offers.MESSAGE_CALLBACK_PREFIX) работает при любом BB_CHAT_MENU, и на старом сообщении тоже; кнопка меню
+    переписки, когда меню выключено (старое меню в чате): только ответ. Нажатия одного человека идут по очереди,
+    повторное нажатие после «сразу в группе» получает тот же итог (_press).
     """
-    in_message = _is_offer_message(callback.message)
-    if not in_message and not chat_menu_enabled(db_user):
+    data = callback.data or ''
+    in_message = data.startswith(bb_offers.MESSAGE_CALLBACK_PREFIX)
+    if db_user is None or (not in_message and not chat_menu_enabled(db_user)):
         await callback.answer()
         return
     language = getattr(db_user, 'language', None) or 'ru'
-    wanted = (callback.data or '').removeprefix(bb_offers.CALLBACK_PREFIX)
-    offer = None
-    try:
-        offers = await bb_offers.load_offers(db_user)
-        offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
-        if offer is None:
-            key = 'offer_gone'
-        elif offer['state'] == 'pending':
-            key = 'offer_pending'
+    prefix = bb_offers.MESSAGE_CALLBACK_PREFIX if in_message else bb_offers.CALLBACK_PREFIX
+    wanted = data.removeprefix(prefix)
+    async with _press_lock(db_user.telegram_id):
+        offer, key = await _press(db_user, wanted)
+        try:
+            # Нажатие могло идти до CLAIM_TIMEOUT: Telegram уже не принимает ответ («query is too old»), меню всё равно
+            if key:
+                await callback.answer(bb_text(language, key))
+            else:
+                await callback.answer()
+        except Exception as error:
+            logger.warning('BlackBird: ответ на нажатие не принят', key=key, error=repr(error))
+        if in_message:
+            await _edit_offer_message(callback, offer, key, language)
         else:
-            state = await bb_offers.claim_offer(db_user, offer['id'])
-            key = 'offer_gone' if state is None else 'offer_pending' if state == 'pending' else None
-    except bb_offers.Unavailable:
-        # Сбой связи не «предложение пропало»: кнопка остаётся (кэш не тронут), человек нажмёт ещё раз.
-        key = 'offer_retry'
-    try:
-        # Нажатие могло идти до CLAIM_TIMEOUT: Telegram уже не принимает ответ («query is too old»), меню всё равно
-        if key:
-            await callback.answer(bb_text(language, key))
-        else:
-            await callback.answer()
-    except Exception as error:
-        logger.warning('BlackBird: ответ на нажатие не принят', key=key, error=repr(error))
-    if in_message:
-        await _edit_offer_message(callback, offer, key, language)
-    else:
-        await bb_edit_main_menu(callback, db_user, db)
+            await bb_edit_main_menu(callback, db_user, db)
 
 
 async def on_offer_wait(callback: CallbackQuery, db_user=None) -> None:
@@ -414,5 +452,8 @@ async def on_offer_wait(callback: CallbackQuery, db_user=None) -> None:
 
 
 def register_handlers(dp: Dispatcher) -> None:
-    dp.callback_query.register(on_offer, F.data.startswith(bb_offers.CALLBACK_PREFIX))
+    dp.callback_query.register(
+        on_offer,
+        F.data.startswith(bb_offers.CALLBACK_PREFIX) | F.data.startswith(bb_offers.MESSAGE_CALLBACK_PREFIX),
+    )
     dp.callback_query.register(on_offer_wait, F.data == bb_offers.WAIT_CALLBACK)

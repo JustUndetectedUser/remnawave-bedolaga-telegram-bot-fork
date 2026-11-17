@@ -2324,6 +2324,8 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
             )
 
         pinned_message = await get_active_pinned_message(db)
+        # BlackBird: offer_<код>, регистрация закончилась раньше; до try: сбой сборки меню её не пропускает
+        await bb_offers.after_start(existing_user, callback.bot)
         try:
             keyboard = await get_main_menu_keyboard_async(
                 db=db,
@@ -2340,8 +2342,6 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(callback.bot, db, existing_user, pinned_message)
-            # BlackBird: offer_<код>, регистрация закончилась раньше
-            await bb_offers.after_start(existing_user, callback.bot)
             # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
             await maybe_send_bb_keyboard(callback.bot, callback.message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(callback.message, existing_user, texts, db, keyboard):
@@ -2694,6 +2694,8 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             )
 
         pinned_message = await get_active_pinned_message(db)
+        # BlackBird: offer_<код>, регистрация закончилась раньше; до try: сбой сборки меню её не пропускает
+        await bb_offers.after_start(existing_user, message.bot)
         try:
             keyboard = await get_main_menu_keyboard_async(
                 db=db,
@@ -2710,8 +2712,6 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
             )
             if pinned_message and pinned_message.send_before_menu:
                 await _send_pinned_message(message.bot, db, existing_user, pinned_message)
-            # BlackBird: offer_<код>, регистрация закончилась раньше
-            await bb_offers.after_start(existing_user, message.bot)
             # BlackBird: две кнопки над строкой ввода, до меню (последним остаётся меню с кнопками)
             await maybe_send_bb_keyboard(message.bot, message.chat.id, existing_user)
             if not await try_answer_rich_main_menu(message, existing_user, texts, db, keyboard):
