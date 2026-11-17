@@ -19,7 +19,7 @@ jobs:
     if: ${{ !startsWith(github.head_ref, 'release-please--') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
 
       - name: Install the parser release-please uses
         run: npm install --no-save --no-package-lock --no-audit --no-fund @conventional-commits/parser@0.4.1
