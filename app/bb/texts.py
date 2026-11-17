@@ -39,6 +39,12 @@ TEXTS = {
         'tariffs_empty': 'Сейчас нет тарифов для покупки.',
         'tariff_popular': 'самый популярный',
         'tariff_price': '{price} за {period}',
+        # Продление
+        'renew_status': 'Ваш тариф: {tariff} · {devices} · до {date} · Баланс {balance}',
+        'btn_renew_period': 'Продлить на {period} · {price}',
+        'btn_change_tariff': 'Сменить тариф',
+        'btn_back': '← Назад',
+        'renew_topup_short': 'Пополнение получено, но для продления не хватает ещё {missing}.',
     },
     'en': {
         'btn_bot': 'Open bot menu',
@@ -75,6 +81,12 @@ TEXTS = {
         'tariffs_empty': 'There are no plans to buy right now.',
         'tariff_popular': 'most popular',
         'tariff_price': '{price} for {period}',
+        # Renewal
+        'renew_status': 'Your plan: {tariff} · {devices} · until {date} · Balance {balance}',
+        'btn_renew_period': 'Renew for {period} · {price}',
+        'btn_change_tariff': 'Change plan',
+        'btn_back': '← Back',
+        'renew_topup_short': 'Top-up received, but {missing} more is needed to renew.',
     },
 }
 

@@ -129,6 +129,9 @@
 - `app/bb/main_menu.py` — Python-модуль
   Классы: нет
   Функции: `format_day` — «16 декабря» / «16 December»; год только если он не текущий. Дата в зоне TIMEZONE., `display_name` — Название тарифа для людей: слова заглавными в базе (PRO, TRIAL PRO) с заглавной буквы, «Unlimited Pro» как есть., `trial_display_name` — «TRIAL PRO» -> «Pro»: название пробного тарифа без слова TRIAL., `is_unlimited`, `trial_available` — Те же проверки, что у ссылки на пробный в rich-меню Bedolaga (rich_menu._trial_offer_link), `bb_main_menu` — Текст (HTML) и кнопки главного меню. tariff: тариф подписки, если уже загружен отдельно., `trial_numbers` — Дни и устройства пробного так же, как их выдаёт activate_trial: из пробного тарифа, иначе из настроек., `build_bb_main_menu`, `bb_send_main_menu` — Новое сообщение с меню. False: не получилось, Bedolaga рисует своё меню., `bb_edit_main_menu` — Меню на месте сообщения с кнопкой; картинку или rich-сообщение заменяет новым текстом.
+- `app/bb/renew.py` — Python-модуль
+  Классы: нет
+  Функции: `renewable` — Действующая, с исчерпанным трафиком или закончившаяся; отключённую админом не продлеваем., `renew_period` — 30 дней, если у тарифа есть такая цена, иначе самый короткий платный период., `renew_price` — Цена тем же расчётом, которым продление Bedolaga потом списывает деньги (скидки, лишние устройства)., `renew_message`, `on_renew`, `notify_renew_shortfall` — Пополнения не хватило на продление из корзины: сколько ещё нужно, под ним оплата остатка., `register_handlers`
 - `app/bb/rollout.py` — Python-модуль
   Классы: нет
   Функции: `chat_menu_enabled` — off (и любое неизвестное значение) -> False; admins -> только админы; all -> все.
@@ -3358,6 +3361,9 @@
 - `tests/bb/test_main_menu.py` — Python-модуль
   Классы: нет
   Функции: `trial_on`, `test_menu_active`, `test_menu_active_trial_status`, `test_format_day_year_only_when_not_current`, `test_menu_unlimited_pro_has_no_renew`, `test_menu_expired_renew_first`, `test_menu_disabled_offers_nothing_impossible`, `test_first_visit_trial_offer`, `test_first_visit_trial_used_only_tariffs`, `test_trial_numbers_from_trial_tariff`, `test_tariffs_message_is_new_message`, `test_render_hooks_use_bb_menu`, `test_render_hooks_untouched_when_off`, `test_trial_activation_lands_on_connect`, `test_no_em_dash_in_texts`
+- `tests/bb/test_renew.py` — Python-модуль
+  Классы: нет
+  Функции: `test_renew_screen_buttons`, `test_renew_devices_plural`, `test_renew_trial_or_no_subscription_shows_paid_tariffs`, `test_renew_unlimited_or_disabled_falls_back_to_main_menu`, `test_renew_button_is_routed`, `test_insufficient_shows_exact_missing_methods` — Кнопка «Продлить» при нехватке денег -> экран Bedolaga: оплата ровно на 230 ₽ и корзина для автопокупки., `test_partial_topup_reports_remaining` — Tribute пришло 180 ₽ из 230 ₽: продление не прошло, в новом меню бот пишет, что не хватает ещё 50 ₽., `test_shortfall_notice_never_raises`
 - `tests/bb/test_smoke.py` — Python-модуль
   Классы: нет
   Функции: `test_bb_package_imports`

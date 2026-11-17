@@ -572,6 +572,17 @@ async def _auto_extend_subscription(
             balance_kopeks=user.balance_kopeks,
             price_kopeks=prepared.price_kopeks,
         )
+        # BlackBird: в меню в переписке сказать, сколько ещё не хватает (иначе человек не узнает).
+        from app.bb.renew import notify_renew_shortfall
+
+        await notify_renew_shortfall(
+            bot,
+            user,
+            missing_kopeks=prepared.price_kopeks - user.balance_kopeks,
+            tariff_id=prepared.tariff_id,
+            subscription_id=prepared.subscription.id,
+            period=prepared.period_days,
+        )
         return False
 
     subscription = prepared.subscription
