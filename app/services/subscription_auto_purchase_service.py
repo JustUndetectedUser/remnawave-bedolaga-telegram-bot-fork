@@ -981,6 +981,12 @@ async def _auto_purchase_tariff(
             balance_kopeks=user.balance_kopeks,
             final_price=final_price,
         )
+        # BlackBird: в меню в переписке сказать, сколько ещё не хватает (без bot, при «Подтвердить», молчит).
+        from app.bb.renew import notify_purchase_shortfall
+
+        await notify_purchase_shortfall(
+            bot, user, missing_kopeks=final_price - user.balance_kopeks, tariff_id=tariff_id, period=period_days
+        )
         return False
 
     # Save promo offer state before deduction (for restore on failure)

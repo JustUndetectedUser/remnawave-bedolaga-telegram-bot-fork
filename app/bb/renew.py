@@ -4,7 +4,7 @@
 Денег хватает: кнопка tariff_ext_confirm:<подписка>:<тариф>:<дни> продлевает сразу. Не хватает:
 tariff_extend:<подписка>:<тариф>:<дни> сохраняет корзину и показывает оплату ровно недостающей суммы
 (AUTO_PURCHASE_AFTER_TOPUP_ENABLED), после оплаты подписка продлевается сама. Пополнения не хватило:
-notify_renew_shortfall пишет, сколько ещё нужно.
+notify_renew_shortfall и notify_purchase_shortfall пишут, сколько ещё нужно.
 """
 
 import html
@@ -129,14 +129,13 @@ async def on_renew(callback: types.CallbackQuery, db_user, db: AsyncSession) -> 
     await callback.answer()
 
 
-async def notify_renew_shortfall(
-    bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int | None, subscription_id: int, period: int
-) -> None:
-    """Пополнения не хватило на продление из корзины: сколько ещё нужно, под ним оплата остатка.
+async def _notify_shortfall(bot: Bot | None, user, missing_kopeks: int, text_key: str, keyboard) -> None:
+    """Пополнения не хватило на покупку из корзины: сколько ещё нужно, под ним оплата остатка.
 
-    Зовётся из subscription_auto_purchase_service._auto_extend_subscription, где Bedolaga в этом случае только
-    пишет в лог. Корзина и метка намерения остаются, так что оплата остатка этими кнопками продлит подписку сама.
-    Ошибки только в лог: автопокупка после пополнения не должна падать из-за сообщения.
+    Bedolaga в этом случае только пишет в лог. Корзина и метка намерения остаются, так что оплата остатка
+    кнопками Bedolaga (keyboard(tariff_purchase, language)) доведёт покупку до конца сама. bot есть только у
+    автопокупки после пополнения: при покупке кнопкой «Подтвердить» (_confirm_tariff_checkout) его нет и
+    сообщения нет. Ошибки только в лог: автопокупка не должна падать из-за сообщения.
     """
     chat_id = getattr(user, 'telegram_id', None)
     if bot is None or not chat_id or missing_kopeks <= 0 or not chat_menu_enabled(user):
@@ -144,15 +143,40 @@ async def notify_renew_shortfall(
     language = getattr(user, 'language', None) or 'ru'
     try:
         # Локальный импорт: модуль хендлеров тянет за собой почти весь бот.
-        from app.handlers.subscription.tariff_purchase import get_tariff_extend_insufficient_balance_keyboard
+        from app.handlers.subscription import tariff_purchase
 
-        keyboard = get_tariff_extend_insufficient_balance_keyboard(
-            tariff_id, subscription_id, period, language, missing_kopeks=missing_kopeks
-        )
-        text = bb_text(language, 'renew_topup_short').format(missing=Texts.format_price(missing_kopeks))
-        await bot.send_message(chat_id, text, reply_markup=keyboard)
+        text = bb_text(language, text_key).format(missing=Texts.format_price(missing_kopeks))
+        await bot.send_message(chat_id, text, reply_markup=keyboard(tariff_purchase, language))
     except Exception:
         logger.exception('BlackBird: не удалось сообщить о нехватке после пополнения', chat_id=chat_id)
+
+
+async def notify_renew_shortfall(
+    bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int | None, subscription_id: int, period: int
+) -> None:
+    """Продление из корзины (subscription_auto_purchase_service._auto_extend_subscription)."""
+    await _notify_shortfall(
+        bot,
+        user,
+        missing_kopeks,
+        'renew_topup_short',
+        lambda module, language: module.get_tariff_extend_insufficient_balance_keyboard(
+            tariff_id, subscription_id, period, language, missing_kopeks=missing_kopeks
+        ),
+    )
+
+
+async def notify_purchase_shortfall(bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int, period: int) -> None:
+    """Покупка тарифа из корзины, в том числе пробный -> платный (_auto_purchase_tariff)."""
+    await _notify_shortfall(
+        bot,
+        user,
+        missing_kopeks,
+        'purchase_topup_short',
+        lambda module, language: module.get_tariff_insufficient_balance_keyboard(
+            tariff_id, period, language, missing_kopeks=missing_kopeks
+        ),
+    )
 
 
 def register_handlers(dp: Dispatcher) -> None:

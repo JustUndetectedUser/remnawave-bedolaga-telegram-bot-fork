@@ -303,6 +303,73 @@ async def test_partial_topup_reports_remaining(monkeypatch, mode):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['all', 'off'])
+async def test_partial_topup_reports_remaining_tariff_purchase(monkeypatch, mode):
+    """Пробный -> платный: «Платные тарифы» -> Pro, корзина tariff_purchase. Tribute пришло 180 ₽ из 230 ₽:
+    тариф не куплен, в новом меню бот пишет, что не хватает ещё 50 ₽. Bedolaga здесь тоже молчит."""
+    from app.services.subscription_auto_purchase_service import auto_purchase_saved_cart_after_topup
+
+    _enable_auto_purchase(monkeypatch)
+    monkeypatch.setattr(settings, 'SALES_MODE', 'tariffs')
+    monkeypatch.setattr(settings, 'MULTI_TARIFF_ENABLED', False)
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', mode)
+    tariff = _tariff()
+    trial = _sub('trial', is_trial=True, tariff=_tariff('TRIAL PRO', None, 5))
+    trial.updated_at = None
+    user = MagicMock()
+    user.id = 42
+    user.telegram_id = 7
+    user.language = 'ru'
+    user.balance_kopeks = 12000 + 18000
+    cart = {
+        'cart_mode': 'tariff_purchase',
+        'tariff_checkout_id': 'checkout-1',
+        'tariff_id': 3,
+        'period_days': 30,
+        'total_price': 35000,
+        'missing_amount': 23000,
+        'return_to_cart': True,
+        'description': 'Покупка тарифа PRO на 30 дней',
+        'traffic_limit_gb': 0,
+        'device_limit': 8,
+        'subscription_id': 11,
+    }
+    _patch_auto_purchase(monkeypatch, user, trial, tariff, cart, 35000)
+    subtract = AsyncMock(return_value=True)
+    monkeypatch.setattr('app.database.crud.user.subtract_user_balance', subtract)
+    monkeypatch.setattr(
+        'app.database.crud.subscription.get_subscription_by_user_and_tariff', AsyncMock(return_value=None)
+    )
+    monkeypatch.setattr(
+        'app.services.pricing_engine.pricing_engine.calculate_tariff_purchase_price',
+        AsyncMock(return_value=SimpleNamespace(final_total=35000, promo_offer_discount=0)),
+    )
+    db = AsyncMock(spec=AsyncSession)
+    db.scalar.return_value = None  # оплаты этой корзины ещё не было
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+
+    assert await auto_purchase_saved_cart_after_topup(db, user, bot=bot) is False
+
+    subtract.assert_not_awaited()
+    if mode == 'off':
+        bot.send_message.assert_not_awaited()
+        return
+    bot.send_message.assert_awaited_once()
+    args, kwargs = bot.send_message.await_args
+    assert args[0] == 7
+    assert args[1] == 'Пополнение получено, но для покупки тарифа не хватает ещё 50 ₽.'
+    callbacks = _flat(kwargs['reply_markup'])
+    assert 'topup_amount|stars|5000' in callbacks and 'topup_amount|tribute|5000' in callbacks
+    assert 'tariff_select:3' in callbacks
+
+    bot.send_message.reset_mock()
+    user.language = 'en'
+    await auto_purchase_saved_cart_after_topup(db, user, bot=bot)
+    assert bot.send_message.await_args.args[1] == 'Top-up received, but 50 ₽ more is needed to buy the plan.'
+
+
+@pytest.mark.asyncio
 async def test_shortfall_notice_never_raises(monkeypatch):
     monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'all')
     bot = MagicMock()

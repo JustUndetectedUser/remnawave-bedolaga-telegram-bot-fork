@@ -45,6 +45,7 @@ TEXTS = {
         'btn_change_tariff': 'Сменить тариф',
         'btn_back': '← Назад',
         'renew_topup_short': 'Пополнение получено, но для продления не хватает ещё {missing}.',
+        'purchase_topup_short': 'Пополнение получено, но для покупки тарифа не хватает ещё {missing}.',
     },
     'en': {
         'btn_bot': 'Open bot menu',
@@ -87,6 +88,7 @@ TEXTS = {
         'btn_change_tariff': 'Change plan',
         'btn_back': '← Back',
         'renew_topup_short': 'Top-up received, but {missing} more is needed to renew.',
+        'purchase_topup_short': 'Top-up received, but {missing} more is needed to buy the plan.',
     },
 }
 
