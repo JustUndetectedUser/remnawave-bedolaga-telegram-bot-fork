@@ -129,24 +129,40 @@ async def on_renew(callback: types.CallbackQuery, db_user, db: AsyncSession) -> 
     await callback.answer()
 
 
-async def _notify_shortfall(bot: Bot | None, user, missing_kopeks: int, text_key: str, keyboard) -> None:
+def shortfall_keyboard(missing_kopeks: int, language: str) -> InlineKeyboardMarkup:
+    """Оплата ровно недостающей суммы (кнопки topup_amount|метод|сумма) и «← Назад» в главное меню.
+
+    Кнопки оплаты те же, что на экране нехватки Bedolaga (get_payment_methods_keyboard), без её навигации.
+    Корзина и метка намерения остаются, так что после оплаты покупка или продление пройдут сами.
+    """
+    # Локальный импорт: клавиатуры Bedolaga тянут за собой половину бота.
+    from app.keyboards.inline import get_payment_methods_keyboard
+
+    rows = [
+        row
+        for row in get_payment_methods_keyboard(missing_kopeks, language).inline_keyboard
+        if row and all((button.callback_data or '').startswith('topup_amount|') for button in row)
+    ]
+    if not rows:
+        rows = [[InlineKeyboardButton(text=bb_text(language, 'btn_topup'), callback_data='balance_topup')]]
+    rows.append([InlineKeyboardButton(text=bb_text(language, 'btn_back'), callback_data='back_to_menu')])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _notify_shortfall(bot: Bot | None, user, missing_kopeks: int, text_key: str) -> None:
     """Пополнения не хватило на покупку из корзины: сколько ещё нужно, под ним оплата остатка.
 
-    Bedolaga в этом случае только пишет в лог. Корзина и метка намерения остаются, так что оплата остатка
-    кнопками Bedolaga (keyboard(tariff_purchase, language)) доведёт покупку до конца сама. bot есть только у
-    автопокупки после пополнения: при покупке кнопкой «Подтвердить» (_confirm_tariff_checkout) его нет и
-    сообщения нет. Ошибки только в лог: автопокупка не должна падать из-за сообщения.
+    Bedolaga в этом случае только пишет в лог. bot есть только у автопокупки после пополнения: при покупке
+    кнопкой «Подтвердить» (_confirm_tariff_checkout) его нет и сообщения нет. Ошибки только в лог:
+    автопокупка не должна падать из-за сообщения.
     """
     chat_id = getattr(user, 'telegram_id', None)
     if bot is None or not chat_id or missing_kopeks <= 0 or not chat_menu_enabled(user):
         return
     language = getattr(user, 'language', None) or 'ru'
     try:
-        # Локальный импорт: модуль хендлеров тянет за собой почти весь бот.
-        from app.handlers.subscription import tariff_purchase
-
         text = bb_text(language, text_key).format(missing=Texts.format_price(missing_kopeks))
-        await bot.send_message(chat_id, text, reply_markup=keyboard(tariff_purchase, language))
+        await bot.send_message(chat_id, text, reply_markup=shortfall_keyboard(missing_kopeks, language))
     except Exception:
         logger.exception('BlackBird: не удалось сообщить о нехватке после пополнения', chat_id=chat_id)
 
@@ -154,29 +170,16 @@ async def _notify_shortfall(bot: Bot | None, user, missing_kopeks: int, text_key
 async def notify_renew_shortfall(
     bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int | None, subscription_id: int, period: int
 ) -> None:
-    """Продление из корзины (subscription_auto_purchase_service._auto_extend_subscription)."""
-    await _notify_shortfall(
-        bot,
-        user,
-        missing_kopeks,
-        'renew_topup_short',
-        lambda module, language: module.get_tariff_extend_insufficient_balance_keyboard(
-            tariff_id, subscription_id, period, language, missing_kopeks=missing_kopeks
-        ),
-    )
+    """Продление из корзины (subscription_auto_purchase_service._auto_extend_subscription).
+
+    tariff_id, subscription_id и period в сообщении не нужны: оплата остатка идёт по сохранённой корзине.
+    """
+    await _notify_shortfall(bot, user, missing_kopeks, 'renew_topup_short')
 
 
 async def notify_purchase_shortfall(bot: Bot | None, user, *, missing_kopeks: int, tariff_id: int, period: int) -> None:
     """Покупка тарифа из корзины, в том числе пробный -> платный (_auto_purchase_tariff)."""
-    await _notify_shortfall(
-        bot,
-        user,
-        missing_kopeks,
-        'purchase_topup_short',
-        lambda module, language: module.get_tariff_insufficient_balance_keyboard(
-            tariff_id, period, language, missing_kopeks=missing_kopeks
-        ),
-    )
+    await _notify_shortfall(bot, user, missing_kopeks, 'purchase_topup_short')
 
 
 def register_handlers(dp: Dispatcher) -> None:

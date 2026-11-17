@@ -294,6 +294,9 @@ async def test_partial_topup_reports_remaining(monkeypatch, mode):
     # Под сообщением та же оплата недостающего, что на экране нехватки: корзина ещё сохранена.
     callbacks = _flat(kwargs['reply_markup'])
     assert 'topup_amount|stars|5000' in callbacks and 'topup_amount|tribute|5000' in callbacks
+    # «Назад» в главное меню, а не на экран продления Bedolaga (subscription_extend).
+    assert callbacks[-1] == 'back_to_menu' and 'subscription_extend' not in callbacks
+    assert _labels(kwargs['reply_markup'])[-1] == ['← Назад']
 
     # en
     bot.send_message.reset_mock()
@@ -361,7 +364,7 @@ async def test_partial_topup_reports_remaining_tariff_purchase(monkeypatch, mode
     assert args[1] == 'Пополнение получено, но для покупки тарифа не хватает ещё 50 ₽.'
     callbacks = _flat(kwargs['reply_markup'])
     assert 'topup_amount|stars|5000' in callbacks and 'topup_amount|tribute|5000' in callbacks
-    assert 'tariff_select:3' in callbacks
+    assert callbacks[-1] == 'back_to_menu' and 'tariff_select:3' not in callbacks
 
     bot.send_message.reset_mock()
     user.language = 'en'
