@@ -41,6 +41,8 @@ TEXTS = {
         'tariff_price': '{price} за {period}',
         # Продление
         'renew_status': 'Ваш тариф: {tariff} · {devices} · до {date} · Баланс {balance}',
+        'renew_status_expired': 'Ваш тариф: {tariff} · {devices} · закончилась {date} · Баланс {balance}',
+        'renew_status_no_date': 'Ваш тариф: {tariff} · {devices} · Баланс {balance}',
         'btn_renew_period': 'Продлить на {period} · {price}',
         'btn_change_tariff': 'Сменить тариф',
         'btn_back': '← Назад',
@@ -122,6 +124,8 @@ TEXTS = {
         'tariff_price': '{price} for {period}',
         # Renewal
         'renew_status': 'Your plan: {tariff} · {devices} · until {date} · Balance {balance}',
+        'renew_status_expired': 'Your plan: {tariff} · {devices} · ended {date} · Balance {balance}',
+        'renew_status_no_date': 'Your plan: {tariff} · {devices} · Balance {balance}',
         'btn_renew_period': 'Renew for {period} · {price}',
         'btn_change_tariff': 'Change plan',
         'btn_back': '← Back',

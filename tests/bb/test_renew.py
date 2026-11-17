@@ -105,11 +105,23 @@ async def test_renew_screen_buttons(monkeypatch):
     assert text == 'Ваш тариф: Pro · 8 устройств · до 16 декабря · Баланс 500 ₽'
     assert _callbacks(kb) == [['tariff_ext_confirm:11:3:30'], ['tariff_switch'], ['back_to_menu']]
 
-    # Закончившаяся подписка продлевается с того же экрана.
+    # Закончившаяся подписка продлевается с того же экрана; «Сменить тариф» ведёт в «Платные тарифы»
+    # (переключение Bedolaga для закончившейся подписки отвечает «Переключение недоступно»).
     expired = _sub('expired', tariff=tariff, end=datetime(THIS_YEAR, 1, 2, tzinfo=UTC))
     text, kb = await _render(monkeypatch, _user(subscription=expired), tariff)
-    assert text.startswith('Ваш тариф: Pro · 8 устройств · до 2 января')
-    assert _callbacks(kb)[0] == ['tariff_extend:11:3:30']
+    assert text == 'Ваш тариф: Pro · 8 устройств · закончилась 2 января · Баланс 120 ₽'
+    assert _callbacks(kb) == [['tariff_extend:11:3:30'], ['bb_tariffs'], ['back_to_menu']]
+    text, _ = await _render(monkeypatch, _user(language='en', subscription=expired), tariff)
+    assert text == 'Your plan: Pro · 8 devices · ended 2 January · Balance 120 ₽'
+
+    # Даты окончания нет: без даты, а не «до  · Баланс».
+    no_date = _sub(tariff=tariff)
+    no_date.end_date = None
+    text, _ = await _render(monkeypatch, _user(subscription=no_date), tariff)
+    assert text == 'Ваш тариф: Pro · 8 устройств · Баланс 120 ₽'
+    expired.end_date = None
+    text, _ = await _render(monkeypatch, _user(language='en', subscription=expired), tariff)
+    assert text == 'Your plan: Pro · 8 devices · Balance 120 ₽'
 
     text, kb = await _render(monkeypatch, _user(language='en', subscription=_sub(tariff=tariff)), tariff)
     assert text == 'Your plan: Pro · 8 devices · until 16 December · Balance 120 ₽'

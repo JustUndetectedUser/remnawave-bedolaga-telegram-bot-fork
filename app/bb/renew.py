@@ -75,7 +75,12 @@ def renew_message(
 ) -> tuple[str, InlineKeyboardMarkup]:
     balance = getattr(user, 'balance_kopeks', 0) or 0
     end_date = getattr(subscription, 'end_date', None)
-    text = bb_text(language, 'renew_status').format(
+    expired = (getattr(subscription, 'actual_status', '') or '').lower() == 'expired'
+    if end_date is None:
+        status_key = 'renew_status_no_date'
+    else:
+        status_key = 'renew_status_expired' if expired else 'renew_status'
+    text = bb_text(language, status_key).format(
         tariff=html.escape(display_name(tariff.name)),
         devices=bb_count(language, _devices(subscription, tariff), 'devices'),
         date=format_day(end_date, language) if end_date else '',
@@ -88,7 +93,9 @@ def renew_message(
             period=bb_count(language, period, 'days'), price=Texts.format_price(price_kopeks)
         )
         rows.append([InlineKeyboardButton(text=label, callback_data=f'{step}:{subscription.id}:{tariff.id}:{period}')])
-    rows.append([InlineKeyboardButton(text=bb_text(language, 'btn_change_tariff'), callback_data='tariff_switch')])
+    # Переключение Bedolaga у закончившейся подписки отвечает «Переключение недоступно»: туда платные тарифы.
+    change = 'bb_tariffs' if expired else 'tariff_switch'
+    rows.append([InlineKeyboardButton(text=bb_text(language, 'btn_change_tariff'), callback_data=change)])
     rows.append([InlineKeyboardButton(text=bb_text(language, 'btn_back'), callback_data='back_to_menu')])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
