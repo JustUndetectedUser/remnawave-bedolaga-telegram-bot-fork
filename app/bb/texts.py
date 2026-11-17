@@ -24,6 +24,9 @@ TEXTS = {
         'offer_retry': 'Не получилось, попробуйте ещё раз',
         'offer_taken': 'Эта ссылка уже использована другим аккаунтом.',
         'offer_dead': 'Ссылка больше не действует.',
+        # Сообщение после /start offer_<код> (send_offer): заголовок, под ним название и текст группы, кнопка
+        'offer_available': '🎁 Вам доступен уникальный тариф',
+        'btn_offer_connect': 'Подключить',
         'menu_status': 'Подписка {tariff} до {date} · Баланс {balance}',
         'menu_status_trial': 'Пробный {tariff} до {date} · Баланс {balance}',
         'menu_status_expired': 'Подписка {tariff} закончилась {date} · Баланс {balance}',
@@ -115,6 +118,9 @@ TEXTS = {
         'offer_retry': 'Something went wrong, please try again',
         'offer_taken': 'This link has already been used by another account.',
         'offer_dead': 'This link is no longer valid.',
+        # Message after /start offer_<code> (send_offer): heading, then the group's title and text, button
+        'offer_available': '🎁 A special plan is available to you',
+        'btn_offer_connect': 'Activate',
         'menu_status': '{tariff} subscription until {date} · Balance {balance}',
         'menu_status_trial': '{tariff} trial until {date} · Balance {balance}',
         'menu_status_expired': '{tariff} subscription ended on {date} · Balance {balance}',

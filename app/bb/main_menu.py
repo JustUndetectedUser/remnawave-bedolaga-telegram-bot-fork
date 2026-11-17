@@ -4,7 +4,8 @@
 хуки в app/utils/rich_menu.py (try_send_rich_main_menu и try_edit_rich_main_menu).
 
 Уникальный тариф промогруппы (app/bb/offers.py): первой строкой кнопка или «Заявка на рассмотрении», над строкой
-статуса название группы. Нажатие обрабатывается здесь же: offers.py не тянет меню, иначе кольцо импортов.
+статуса название группы. Нажатие обрабатывается здесь же: offers.py не тянет меню, иначе кольцо импортов. Здесь же
+нажатие «Подключить» в сообщении после /start offer_<код> (offers.send_offer), при любом BB_CHAT_MENU.
 """
 
 import html
@@ -338,16 +339,48 @@ async def bb_edit_main_menu(callback: CallbackQuery, db_user, db: AsyncSession) 
         return False
 
 
-async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
-    """«Вам доступен уникальный тариф»: то же, что вход на странице ссылки (заявка или сразу в группе), затем меню.
+def _is_offer_message(message) -> bool:
+    """Сообщение «Подключить» (offers.offer_message): ровно одна кнопка. В меню переписки строк больше (строка
+    предложения и кнопки меню); клавиатура неизвестна (InaccessibleMessage) - не сообщение."""
+    rows = getattr(getattr(message, 'reply_markup', None), 'inline_keyboard', None)
+    return isinstance(rows, list) and len(rows) == 1 and isinstance(rows[0], list) and len(rows[0]) == 1
 
-    Сообщения админам и приветствие группы шлёт guest-key; здесь только короткий ответ на нажатие.
+
+async def _edit_offer_message(callback: CallbackQuery, offer: dict | None, key: str | None, language: str) -> None:
+    """Сообщение «Подключить» после нажатия, без кнопки: заявка ждёт - «Заявка на рассмотрении» и название;
+    предложения нет - «Предложение больше не доступно»; сразу в группе (приветствие шлёт guest-key) - только кнопка
+    убрана. Сбой связи: сообщение с кнопкой остаётся, человек нажмёт ещё раз."""
+    message, bot = callback.message, callback.bot
+    if key == 'offer_retry' or message is None or bot is None or isinstance(message, InaccessibleMessage):
+        return
+    target = {'chat_id': message.chat.id, 'message_id': message.message_id}
+    try:
+        if key == 'offer_pending' and offer is not None:
+            text, _ = bb_offers.offer_message(dict(offer, state='pending'), language)
+        elif key == 'offer_gone':
+            text = bb_text(language, 'offer_gone')
+        else:
+            await bot.edit_message_reply_markup(**target, reply_markup=None)
+            return
+        await bot.edit_message_text(**target, text=text, parse_mode='HTML', link_preview_options=NO_PREVIEW)
+    except Exception as error:
+        logger.debug('BlackBird: сообщение о предложении не поправлено', key=key, error=repr(error))
+
+
+async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
+    """Нажатие «Вам доступен уникальный тариф» в меню переписки или «Подключить» в сообщении после /start offer_<код>.
+
+    То же, что вход на странице ссылки (заявка или сразу в группе), затем меню или само сообщение (_edit_offer_message).
+    Сообщения админам и приветствие группы шлёт guest-key; здесь только короткий ответ на нажатие. Сообщение работает
+    при любом BB_CHAT_MENU; кнопка в меню переписки, когда меню выключено (старое меню в чате): только ответ.
     """
-    if not chat_menu_enabled(db_user):
+    in_message = _is_offer_message(callback.message)
+    if not in_message and not chat_menu_enabled(db_user):
         await callback.answer()
         return
     language = getattr(db_user, 'language', None) or 'ru'
     wanted = (callback.data or '').removeprefix(bb_offers.CALLBACK_PREFIX)
+    offer = None
     try:
         offers = await bb_offers.load_offers(db_user)
         offer = next((o for o in offers if bb_offers.offer_hash(o['id']) == wanted), None)
@@ -369,7 +402,10 @@ async def on_offer(callback: CallbackQuery, db_user, db: AsyncSession) -> None:
             await callback.answer()
     except Exception as error:
         logger.warning('BlackBird: ответ на нажатие не принят', key=key, error=repr(error))
-    await bb_edit_main_menu(callback, db_user, db)
+    if in_message:
+        await _edit_offer_message(callback, offer, key, language)
+    else:
+        await bb_edit_main_menu(callback, db_user, db)
 
 
 async def on_offer_wait(callback: CallbackQuery, db_user=None) -> None:

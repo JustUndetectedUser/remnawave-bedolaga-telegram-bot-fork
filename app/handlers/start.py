@@ -1669,6 +1669,8 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
 
         if pinned_message and not pinned_message.send_before_menu:
             await _send_pinned_message(message.bot, db, user, pinned_message)
+        # BlackBird: /start offer_<код>: сообщение с кнопкой «Подключить» последним, после меню
+        await bb_offers.send_offer(user, message.bot)
         await state.clear()
         return
 
@@ -2355,6 +2357,8 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
                     'Добро пожаловать, {user_name}!',
                 ).format(user_name=html.escape(existing_user.full_name or ''))
             )
+        # BlackBird: offer_<код>: сообщение с кнопкой «Подключить» последним, после меню
+        await bb_offers.send_offer(existing_user, callback.bot)
 
         await state.clear()
         return
@@ -2646,6 +2650,8 @@ async def complete_registration_from_callback(callback: types.CallbackQuery, sta
                 ).format(user_name=html.escape(user.full_name or ''))
             )
 
+    # BlackBird: /start offer_<код>: сообщение с кнопкой «Подключить» последним, после приветствия или меню
+    await bb_offers.send_offer(user, callback.bot)
     logger.info('✅ Регистрация завершена для пользователя', telegram_id=user.telegram_id)
 
 
@@ -2721,6 +2727,8 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
                     'Добро пожаловать, {user_name}!',
                 ).format(user_name=html.escape(existing_user.full_name or ''))
             )
+        # BlackBird: offer_<код>: сообщение с кнопкой «Подключить» последним, после меню
+        await bb_offers.send_offer(existing_user, message.bot)
 
         await state.clear()
         return
@@ -3049,6 +3057,8 @@ async def complete_registration(message: types.Message, state: FSMContext, db: A
                 ).format(user_name=html.escape(user.full_name or ''))
             )
 
+    # BlackBird: /start offer_<код>: сообщение с кнопкой «Подключить» последним, после приветствия или меню
+    await bb_offers.send_offer(user, message.bot)
     logger.info('✅ Регистрация завершена для пользователя', telegram_id=user.telegram_id)
 
 
@@ -3320,6 +3330,8 @@ async def required_sub_channel_check(
                 await send_menu_with_media(bot, query.from_user.id, menu_text, keyboard, db)
             if pinned_message and not pinned_message.send_before_menu:
                 await _send_pinned_message(bot, db, user, pinned_message)
+            # BlackBird: offer_<код>: сообщение с кнопкой «Подключить» последним, после меню
+            await bb_offers.send_offer(user, query.bot)
         else:
             from app.keyboards.inline import get_rules_keyboard
 

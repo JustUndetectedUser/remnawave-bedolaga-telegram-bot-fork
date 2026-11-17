@@ -10,9 +10,11 @@ guest-key: внутренний адрес BB_OFFERS_URL (http://guest-key:8091/
   GET  {url}           -> 200 {"offers": [{"id", "title", "text", "state": "open" | "pending"}]}
   POST {url}/register  {"code"} -> 204; 404 not_found; 409 taken
   POST {url}/claim     {"id"}   -> 200 {"state": "pending" | "member" | "granted"}; 404 not_found; 409 decided
-Сообщения админам и приветствие группы шлёт сам guest-key. Бот пишет сам только одно: после /start offer_<код>, если
-ссылку уже взял другой аккаунт (409) или она умерла (404), короткое «ссылка уже использована» / «больше не действует»
-(after_start). Пустой BB_OFFERS_URL: механизма нет, ни одного запроса.
+Сообщения админам и приветствие группы шлёт сам guest-key. Бот пишет сам после /start offer_<код> одно сообщение:
+ссылку уже взял другой аккаунт (409) или она умерла (404) - короткое «ссылка уже использована» / «больше не действует»
+(after_start, до меню); предложение записано (204) - «Вам доступен уникальный тариф» с кнопкой «Подключить» или
+«Заявка на рассмотрении» (send_offer, после приветствия или меню, последним в чате), при любом BB_CHAT_MENU.
+Пустой BB_OFFERS_URL: механизма нет, ни одного запроса.
 
 Сбой связи (таймаут, нет соединения, 5xx, неожиданный ответ) не значит «предложения нет»: при нажатии это
 Unavailable («попробуйте ещё раз», кнопка остаётся), и кэш он не трогает. «Предложения нет» говорят только 404/409
@@ -20,6 +22,7 @@ Unavailable («попробуйте ещё раз», кнопка остаётс
 """
 
 import hashlib
+import html
 import re
 import time
 from enum import StrEnum
@@ -27,6 +30,7 @@ from typing import Any
 
 import aiohttp
 import structlog
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 
 from app.bb.texts import bb_text
 from app.cabinet.auth.jwt_handler import create_access_token
@@ -50,6 +54,9 @@ _CACHE_LIMIT = 4096
 
 # telegram_id -> (до какого момента time.monotonic() верить, предложения)
 _offers_cache: dict[int, tuple[float, list[dict]]] = {}
+# telegram_id -> код, записанный after_start этого /start: сообщение о нём шлёт send_offer после меню (один раз)
+_announce: dict[int, str] = {}
+_NO_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 
 class Unavailable(Exception):
@@ -276,11 +283,14 @@ async def after_start(user, bot=None) -> Registered | None:
     TAKEN или DEAD: ссылка этому аккаунту уже не достанется, бот пишет одно короткое сообщение (bot - бот этого
     обновления; без меню и без ссылки на кабинет, тоже при любом BB_CHAT_MENU). Вызовы в app/handlers/start.py стоят
     до приветствия и меню: сообщение приходит перед ними, меню с кнопками остаётся последним.
+    OK: записано; сообщение с кнопкой «Подключить» шлёт send_offer, его вызовы стоят после приветствия или меню.
     UNAVAILABLE: guest-key не ответил, код снова ждёт (следующий /start), чтобы человеку не пришлось искать ссылку
     ещё раз; молча.
     """
     if not _ready(user):
         return None
+    # Прошлый /start записал код, но до send_offer не дошёл (путь упал): то сообщение уже не шлём.
+    _announce.pop(user.telegram_id, None)
     key = _code_key(user.telegram_id)
     try:
         code = await cache.getdel(key)
@@ -292,6 +302,8 @@ async def after_start(user, bot=None) -> Registered | None:
     except Exception as error:
         logger.warning('BlackBird: код предложения не обработан', error=repr(error), user_id=user.id)
         return None
+    if outcome is Registered.OK:
+        _announce[user.telegram_id] = str(code)
     await _tell(bot, user, outcome)
     return outcome
 
@@ -307,3 +319,47 @@ async def _tell(bot, user, outcome: Registered) -> None:
         logger.warning(
             'BlackBird: сообщение о ссылке не отправлено', outcome=str(outcome), error=repr(error), user_id=user.id
         )
+
+
+def offer_message(offer: dict, language: str | None) -> tuple[str, InlineKeyboardMarkup | None]:
+    """Сообщение о предложении (HTML; название и текст сервера экранированы, как в меню переписки).
+
+    open: «🎁 Вам доступен уникальный тариф», название, текст и кнопка «Подключить» (offer_callback; нажатие
+    в app/bb/main_menu.py, on_offer); pending: «⏳ Заявка на рассмотрении» и название, без кнопки.
+    """
+    title = html.escape(offer.get('title') or '')
+    if offer.get('state') == 'open':
+        head, body = bb_text(language, 'offer_available'), html.escape(offer.get('text') or '')
+        button = InlineKeyboardButton(
+            text=bb_text(language, 'btn_offer_connect'), callback_data=offer_callback(offer['id'])
+        )
+        markup = InlineKeyboardMarkup(inline_keyboard=[[button]])
+    else:
+        head, body, markup = bb_text(language, 'offer_pending'), '', None
+    block = '\n'.join(part for part in (f'<b>{title}</b>' if title else '', body) if part)
+    return (f'{head}\n\n{block}' if block else head), markup
+
+
+async def send_offer(user, bot) -> None:
+    """После приветствия или меню /start offer_<код>: сообщение о предложении этой ссылки, последним в чате.
+
+    Только если after_start этого /start записал код (204), и только предложение с id «<kind>:<код>»: открытое -
+    с кнопкой «Подключить», pending - «Заявка на рассмотрении». Его нет в списке (решение уже было, ссылка умерла)
+    или guest-key не ответил: молча. При любом BB_CHAT_MENU (это не меню переписки). Один раз: второй вызов ничего
+    не шлёт. Исключений нет: ошибка только в лог, /start и регистрация идут дальше.
+    """
+    code = _announce.pop(getattr(user, 'telegram_id', None), None)
+    if code is None or bot is None:
+        return
+    try:
+        offers = await fetch_offers(user)
+        offer = next((o for o in offers if o['id'].rpartition(':')[2] == code), None)
+        if offer is None:
+            logger.info('BlackBird: предложения этой ссылки нет в списке, сообщения нет', user_id=user.id)
+            return
+        text, markup = offer_message(offer, getattr(user, 'language', None))
+        await bot.send_message(
+            user.telegram_id, text, reply_markup=markup, parse_mode='HTML', link_preview_options=_NO_PREVIEW
+        )
+    except Exception as error:
+        logger.warning('BlackBird: сообщение о предложении не отправлено', error=repr(error), user_id=user.id)
