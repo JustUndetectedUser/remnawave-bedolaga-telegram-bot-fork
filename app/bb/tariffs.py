@@ -7,7 +7,7 @@ from aiogram import Dispatcher, F, types
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.bb.main_menu import NO_PREVIEW, is_unlimited
+from app.bb.main_menu import NO_PREVIEW, display_name, is_unlimited
 from app.bb.texts import bb_count, bb_text
 from app.database.crud.tariff import get_tariffs_for_user
 from app.localization.texts import Texts
@@ -40,7 +40,7 @@ def tariffs_message(tariffs, language: str) -> tuple[str, InlineKeyboardMarkup |
     buttons = []
     for tariff in tariffs:
         highlighted = bool(getattr(tariff, 'is_highlighted', False))
-        name = html.escape(tariff.name)
+        name = html.escape(display_name(tariff.name))
         title = f'{STAR if highlighted else ""}<b>{name}</b>'
         if highlighted:
             title += f' · {bb_text(language, "tariff_popular")}'
@@ -60,7 +60,8 @@ def tariffs_message(tariffs, language: str) -> tuple[str, InlineKeyboardMarkup |
         buttons.append(
             [
                 InlineKeyboardButton(
-                    text=f'{STAR if highlighted else ""}{tariff.name}', callback_data=f'tariff_select:{tariff.id}'
+                    text=f'{STAR if highlighted else ""}{display_name(tariff.name)}',
+                    callback_data=f'tariff_select:{tariff.id}',
                 )
             ]
         )

@@ -29,7 +29,7 @@ def _user(*, language='ru', balance=12000, trial_used=False, subscription=None):
     )
 
 
-def _tariff(name='Pro', tag='PAID_PRO', tariff_id=3, **extra):
+def _tariff(name='PRO', tag='PAID_PRO', tariff_id=3, **extra):
     return SimpleNamespace(id=tariff_id, name=name, panel_tag=tag, **extra)
 
 
@@ -76,6 +76,22 @@ def test_menu_active(monkeypatch):
         _, kb = bb_main_menu(_user(), _sub(status, is_trial=status == 'trial'), 'ru')
         assert _callbacks(kb) == [['subscription_connect'], ['bb_renew', 'balance_topup'], ['bb_more']]
 
+    # Названия в базе заглавными (LITE, MAX): показываем «Lite», «Max».
+    text, _ = bb_main_menu(_user(), _sub(tariff=_tariff('LITE', None, 1)), 'ru')
+    assert text == 'Подписка Lite до 16 декабря · Баланс 120 ₽'
+    text, _ = bb_main_menu(_user(), _sub(tariff=_tariff('MAX', None, 4)), 'ru')
+    assert text.startswith('Подписка Max до ')
+
+
+def test_menu_active_trial_status(monkeypatch):
+    monkeypatch.setattr(settings, 'TIMEZONE', 'UTC')
+    sub = _sub('active', is_trial=True, tariff=_tariff('TRIAL PRO', None, 5))
+    text, kb = bb_main_menu(_user(), sub, 'ru')
+    assert text == 'Пробный Pro до 16 декабря · Баланс 120 ₽'
+    assert _callbacks(kb) == [['subscription_connect'], ['bb_renew', 'balance_topup'], ['bb_more']]
+    text_en, _ = bb_main_menu(_user(language='en'), sub, 'en')
+    assert text_en == 'Pro trial until 16 December · Balance 120 ₽'
+
 
 def test_format_day_year_only_when_not_current():
     today = date(2026, 11, 16)
@@ -104,7 +120,7 @@ def test_menu_expired_renew_first():
     text, kb = bb_main_menu(_user(), sub, 'ru')
     assert text.startswith('Подписка Pro закончилась ')
     assert text.endswith(' · Баланс 120 ₽')
-    assert _callbacks(kb) == [['bb_renew'], ['subscription_connect'], ['bb_more']]
+    assert _callbacks(kb) == [['bb_renew'], ['subscription_connect'], ['balance_topup'], ['bb_more']]
     assert kb.inline_keyboard[0][0].text == '💳 Продлить или сменить тариф'
 
 
@@ -143,10 +159,11 @@ def test_first_visit_trial_used_only_tariffs(monkeypatch, trial_on):
     _, kb = bb_main_menu(_user(), None, 'ru')
     assert _callbacks(kb) == [['bb_tariffs']]
 
-    # Пробный закончился или его отключил сторож: сразу «Платные тарифы».
+    # Пробный закончился или его отключил сторож: сразу «Платные тарифы», под ними «Ещё» (поддержка).
     for status in ('expired', 'disabled'):
         text, kb = bb_main_menu(_user(trial_used=True), _sub(status, is_trial=True), 'ru')
-        assert _callbacks(kb) == [['bb_tariffs']]
+        assert _callbacks(kb) == [['bb_tariffs'], ['bb_more']]
+        assert _labels(kb) == [['Платные тарифы'], ['Ещё']]
         assert 'Пробный период закончился' in text
 
 
@@ -162,7 +179,7 @@ async def test_trial_numbers_from_trial_tariff(monkeypatch):
 def _tariffs_db_rows():
     return [
         _tariff(
-            'Max',
+            'MAX',
             None,
             4,
             display_order=4,
@@ -173,7 +190,7 @@ def _tariffs_db_rows():
             device_limit=12,
         ),
         _tariff(
-            'Pro',
+            'PRO',
             'PAID_PRO',
             3,
             display_order=3,
@@ -184,7 +201,7 @@ def _tariffs_db_rows():
             device_limit=8,
         ),
         _tariff(
-            'Lite',
+            'LITE',
             None,
             1,
             display_order=1,
@@ -217,7 +234,7 @@ def _tariffs_db_rows():
             device_limit=8,
         ),
         _tariff(
-            'Base',
+            'BASE',
             None,
             2,
             display_order=2,
@@ -257,6 +274,7 @@ async def test_tariffs_message_is_new_message(monkeypatch):
     assert text.index('Lite text') < text.index('Base text') < text.index('Pro text') < text.index('Max text')
     assert '350 ₽' in text and '8 устройств' in text
     assert 'TRIAL PRO' not in text and 'Unlimited' not in text
+    assert '<b>Lite</b>' in text and '<b>Pro</b>' in text and 'LITE' not in text and 'PRO' not in text
 
 
 @pytest.mark.asyncio

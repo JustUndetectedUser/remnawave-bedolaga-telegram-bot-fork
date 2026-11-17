@@ -53,6 +53,16 @@ def format_day(moment: datetime, language: str | None, *, today: date | None = N
     return text if day.year == today.year else f'{text} {day.year}'
 
 
+def display_name(name: str | None) -> str:
+    """Название тарифа для людей: слова заглавными в базе (PRO, TRIAL PRO) с заглавной буквы, «Unlimited Pro» как есть."""
+    return ' '.join(word.capitalize() if word.isupper() else word for word in (name or '').split())
+
+
+def trial_display_name(name: str | None) -> str:
+    """«TRIAL PRO» -> «Pro»: название пробного тарифа без слова TRIAL."""
+    return display_name(' '.join(word for word in (name or '').split() if word.lower() != 'trial'))
+
+
 def is_unlimited(tariff) -> bool:
     return str(getattr(tariff, 'panel_tag', None) or '').strip().upper() == ENDLESS_TAG
 
@@ -118,11 +128,12 @@ def bb_main_menu(
 
     # Пробный закончился или его отключил сторож: сразу к платным тарифам.
     if getattr(subscription, 'is_trial', False) and not active:
-        return bb_text(language, 'trial_over'), _keyboard(language, (TARIFFS,))
+        return bb_text(language, 'trial_over'), _keyboard(language, (TARIFFS,), (MORE,))
 
     if tariff is None:
         tariff = getattr(subscription, 'tariff', None)
-    name = html.escape(getattr(tariff, 'name', None) or bb_text(language, 'menu_no_tariff'))
+    raw_name = getattr(tariff, 'name', None)
+    name = html.escape(display_name(raw_name) or bb_text(language, 'menu_no_tariff'))
     balance = Texts.format_price(getattr(user, 'balance_kopeks', 0) or 0)
     end_date = getattr(subscription, 'end_date', None)
     day = format_day(end_date, language) if end_date else ''
@@ -138,12 +149,16 @@ def bb_main_menu(
         )
 
     if active:
-        text = bb_text(language, 'menu_status').format(tariff=name, date=day, balance=balance)
+        if getattr(subscription, 'is_trial', False):
+            trial_name = html.escape(trial_display_name(raw_name) or bb_text(language, 'menu_no_tariff'))
+            text = bb_text(language, 'menu_status_trial').format(tariff=trial_name, date=day, balance=balance)
+        else:
+            text = bb_text(language, 'menu_status').format(tariff=name, date=day, balance=balance)
         return text, _keyboard(language, (CONNECT,), (RENEW, TOPUP), (MORE,))
 
     if status == 'expired':
         text = bb_text(language, 'menu_status_expired').format(tariff=name, date=day, balance=balance)
-        return text, _keyboard(language, (RENEW,), (CONNECT,), (MORE,))
+        return text, _keyboard(language, (RENEW,), (CONNECT,), (TOPUP,), (MORE,))
 
     # Отключена (админом) или в непонятном состоянии: ни продления, ни подключения.
     return bb_text(language, 'menu_status_inactive').format(tariff=name, balance=balance), _keyboard(language, (MORE,))
