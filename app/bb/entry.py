@@ -1,4 +1,4 @@
-"""Вход в бот: нажатия двух постоянных кнопок над строкой ввода (сама клавиатура в app.bb.keyboard)."""
+"""Вход в бот: нажатия трёх постоянных кнопок над строкой ввода (сама клавиатура в app.bb.keyboard)."""
 
 import structlog
 from aiogram import Dispatcher, F, types
@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.bb import (
+    browser_login as bb_browser_login,
     connect as bb_connect,
     main_menu as bb_menu,
     more as bb_more,
@@ -25,9 +26,15 @@ from app.utils.rich_menu import try_answer_rich_main_menu
 logger = structlog.get_logger(__name__)
 
 BB_BTN_BOT = TEXTS['ru']['btn_bot']
-BB_BTN_CABINET = TEXTS['ru']['btn_cabinet']
+BB_BTN_WEB = TEXTS['ru']['btn_web']
+BB_BTN_MINIAPP = TEXTS['ru']['btn_miniapp']
 BB_BTN_BOT_EN = TEXTS['en']['btn_bot']
-BB_BTN_CABINET_EN = TEXTS['en']['btn_cabinet']
+BB_BTN_WEB_EN = TEXTS['en']['btn_web']
+BB_BTN_MINIAPP_EN = TEXTS['en']['btn_miniapp']
+# Подписи клавиатуры из двух кнопок (до 21.11): у кого она ещё на экране, кнопки работают как раньше.
+# «В веб-кабинет» тогда открывал Mini App
+BB_LEGACY_BOT = {'Вызвать бота', 'Open bot menu'}
+BB_LEGACY_MINIAPP = {'В веб-кабинет', 'To web account'}
 
 
 async def _delete_incoming(message: types.Message) -> None:
@@ -71,10 +78,34 @@ async def on_cabinet_button(message: types.Message, db_user=None) -> None:
     await message.answer(bb_text(language, 'cabinet_note'), reply_markup=markup)
 
 
+async def on_web_button(message: types.Message, db_user=None) -> None:
+    """«Веб-кабинет»: одноразовая ссылка на кабинет в браузере, сразу с входом (app.bb.browser_login).
+
+    Ссылка новая на каждое нажатие. protect_content: сообщение с ней нельзя переслать.
+    """
+    if not chat_menu_enabled(db_user):
+        raise SkipHandler
+    await _delete_incoming(message)
+    language = getattr(db_user, 'language', None)
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=bb_text(language, 'web_open'),
+                    url=bb_browser_login.browser_login_url(db_user.id),
+                )
+            ]
+        ]
+    )
+    note = bb_text(language, 'web_note').format(minutes=bb_browser_login.TTL_SECONDS // 60)
+    await message.answer(note, reply_markup=markup, protect_content=True)
+
+
 def register_handlers(dp: Dispatcher) -> None:
     """Все хендлеры app.bb (bot.py зовёт только эту функцию)."""
-    dp.message.register(on_bot_button, F.text.in_({BB_BTN_BOT, BB_BTN_BOT_EN}))
-    dp.message.register(on_cabinet_button, F.text.in_({BB_BTN_CABINET, BB_BTN_CABINET_EN}))
+    dp.message.register(on_bot_button, F.text.in_({BB_BTN_BOT, BB_BTN_BOT_EN, *BB_LEGACY_BOT}))
+    dp.message.register(on_web_button, F.text.in_({BB_BTN_WEB, BB_BTN_WEB_EN}))
+    dp.message.register(on_cabinet_button, F.text.in_({BB_BTN_MINIAPP, BB_BTN_MINIAPP_EN, *BB_LEGACY_MINIAPP}))
     bb_tariffs.register_handlers(dp)
     bb_renew.register_handlers(dp)
     bb_connect.register_handlers(dp)

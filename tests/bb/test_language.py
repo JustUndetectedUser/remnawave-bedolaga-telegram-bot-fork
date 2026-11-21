@@ -54,7 +54,7 @@ async def test_language_change_resends_keyboard_in_new_language(patched):
     assert kinds == ['send', 'send', 'delete'], order
     _, _, markup = order[0]
     assert isinstance(markup, ReplyKeyboardMarkup)
-    assert [b.text for b in markup.keyboard[0]] == ['Open bot menu', 'To web account']
+    assert [b.text for b in markup.keyboard[0]] == ['Bot', 'Web account', 'Mini App']
     assert order[1][1] == 'MENU'
 
 
@@ -62,7 +62,7 @@ async def test_language_change_resends_keyboard_in_new_language(patched):
 async def test_language_change_back_to_russian(patched):
     order = []
     await main_menu.bb_after_language_change(_callback(order), _user('ru'), MagicMock())
-    assert [b.text for b in order[0][2].keyboard[0]] == ['Вызвать бота', 'В веб-кабинет']
+    assert [b.text for b in order[0][2].keyboard[0]] == ['Бот', 'Веб-кабинет', 'Mini-App']
 
 
 @pytest.mark.asyncio

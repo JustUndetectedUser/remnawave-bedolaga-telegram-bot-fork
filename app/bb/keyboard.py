@@ -1,4 +1,4 @@
-"""Две постоянные кнопки над строкой ввода и кнопка слева от поля ввода.
+"""Три постоянные кнопки над строкой ввода и кнопка слева от поля ввода.
 
 Модуль лёгкий (без хендлеров): его зовут и главное меню, и старт бота.
 """
@@ -26,13 +26,19 @@ KEYBOARD_FLAG_TTL = 30 * 24 * 3600
 
 
 def _flag_key(telegram_id) -> str:
-    return f'bb_kb_sent:{telegram_id}'
+    # bb_kb3: клавиатура из трёх кнопок (21.11). Новое имя метки, чтобы у тех, кому приходили две кнопки
+    # (bb_kb_sent), новая клавиатура пришла с первым же меню, а не только после /start.
+    return f'bb_kb3_sent:{telegram_id}'
 
 
 def bb_reply_keyboard(language: str) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=bb_text(language, 'btn_bot')), KeyboardButton(text=bb_text(language, 'btn_cabinet'))]
+            [
+                KeyboardButton(text=bb_text(language, 'btn_bot')),
+                KeyboardButton(text=bb_text(language, 'btn_web')),
+                KeyboardButton(text=bb_text(language, 'btn_miniapp')),
+            ]
         ],
         is_persistent=True,
         resize_keyboard=True,

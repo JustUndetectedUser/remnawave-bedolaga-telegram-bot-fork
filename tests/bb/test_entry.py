@@ -5,7 +5,7 @@ import pytest
 from aiogram.dispatcher.event.bases import SkipHandler
 
 from app.bb import entry, keyboard, rollout
-from app.bb.entry import BB_BTN_BOT, BB_BTN_CABINET
+from app.bb.entry import BB_BTN_BOT, BB_BTN_MINIAPP, BB_BTN_WEB
 from app.bb.keyboard import bb_reply_keyboard
 from app.config import settings
 
@@ -47,9 +47,10 @@ def test_reply_keyboard_layout():
     assert kb.is_persistent is True
     assert kb.resize_keyboard is True
     assert len(kb.keyboard) == 1
-    assert [b.text for b in kb.keyboard[0]] == [BB_BTN_BOT, BB_BTN_CABINET]
+    assert [b.text for b in kb.keyboard[0]] == [BB_BTN_BOT, BB_BTN_WEB, BB_BTN_MINIAPP]
+    assert [b.text for b in kb.keyboard[0]] == ['Бот', 'Веб-кабинет', 'Mini-App']
     en = bb_reply_keyboard('en')
-    assert [b.text for b in en.keyboard[0]] == ['Open bot menu', 'To web account']
+    assert [b.text for b in en.keyboard[0]] == ['Bot', 'Web account', 'Mini App']
 
 
 @pytest.fixture
@@ -81,17 +82,17 @@ async def test_bot_button_clears_state_and_shows_menu(monkeypatch, enabled):
 @pytest.mark.asyncio
 async def test_cabinet_button_sends_webapp_button(monkeypatch, enabled):
     monkeypatch.setattr(settings, 'MINIAPP_CUSTOM_URL', 'https://cab.example/app')
-    msg = _message(BB_BTN_CABINET)
+    msg = _message(BB_BTN_MINIAPP)
 
     await entry.on_cabinet_button(msg, _user())
 
     msg.delete.assert_awaited_once()
     msg.answer.assert_awaited_once()
     args, kwargs = msg.answer.await_args
-    assert args[0] == 'Веб-кабинет откроется уже с входом в ваш аккаунт.'
+    assert args[0] == 'Кабинет откроется прямо в Telegram, уже с входом в ваш аккаунт.'
     rows = kwargs['reply_markup'].inline_keyboard
     assert len(rows) == 1 and len(rows[0]) == 1
-    assert rows[0][0].text == 'Открыть веб-кабинет'
+    assert rows[0][0].text == 'Открыть Mini-App'
     assert rows[0][0].web_app.url == 'https://cab.example/app'
 
 
@@ -104,7 +105,9 @@ async def test_buttons_ignored_when_disabled(monkeypatch):
     with pytest.raises(SkipHandler):
         await entry.on_bot_button(msg, state, MagicMock(), _user())
     with pytest.raises(SkipHandler):
-        await entry.on_cabinet_button(_message(BB_BTN_CABINET), _user())
+        await entry.on_cabinet_button(_message(BB_BTN_MINIAPP), _user())
+    with pytest.raises(SkipHandler):
+        await entry.on_web_button(_message(BB_BTN_WEB), _user())
     state.clear.assert_not_awaited()
     msg.delete.assert_not_awaited()
 
@@ -194,6 +197,58 @@ async def test_dispatcher_disabled_falls_through_to_state_handler(monkeypatch):
     state, bot = await _feed(dp, BB_BTN_BOT, state_key=False)
     await bot.session.close()
     assert calls == ['catch_all']
+
+
+@pytest.mark.asyncio
+async def test_first_menu_after_two_button_keyboard_sends_three(monkeypatch, enabled):
+    """Метка старой клавиатуры (bb_kb_sent) не мешает: три кнопки приходят с первым же меню."""
+    from app.bb import main_menu
+
+    fake = _FakeCache()
+    fake.data['bb_kb_sent:7'] = (1, 30 * 24 * 3600)
+    monkeypatch.setattr(keyboard, 'cache', fake)
+    bot = MagicMock()
+    bot.send_message = AsyncMock()
+    bot.set_chat_menu_button = AsyncMock()
+
+    assert await main_menu.bb_send_main_menu(bot, 7, _menu_user(), MagicMock()) is True
+    sent = _sent_reply_keyboards(bot)
+    assert len(sent) == 1
+    assert [b.text for b in sent[0].kwargs['reply_markup'].keyboard[0]] == ['Бот', 'Веб-кабинет', 'Mini-App']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('text', 'handler'),
+    [
+        ('Бот', 'on_bot_button'),
+        ('Bot', 'on_bot_button'),
+        ('Вызвать бота', 'on_bot_button'),
+        ('Open bot menu', 'on_bot_button'),
+        ('Веб-кабинет', 'on_web_button'),
+        ('Web account', 'on_web_button'),
+        ('Mini-App', 'on_cabinet_button'),
+        ('Mini App', 'on_cabinet_button'),
+        # Старая клавиатура: «В веб-кабинет» открывал Mini App — так и остаётся
+        ('В веб-кабинет', 'on_cabinet_button'),
+        ('To web account', 'on_cabinet_button'),
+    ],
+)
+async def test_dispatcher_routes_new_and_old_labels(monkeypatch, text, handler):
+    monkeypatch.setattr(settings, 'BB_CHAT_MENU', 'all')
+    hits = []
+    for name in ('on_bot_button', 'on_web_button', 'on_cabinet_button'):
+
+        async def fake(*args, _name=name, **kwargs):
+            hits.append(_name)
+
+        monkeypatch.setattr(entry, name, fake)
+    calls = []
+    dp = _real_dispatcher(monkeypatch, calls)
+    _, bot = await _feed(dp, text, state_key=False)
+    await bot.session.close()
+    assert hits == [handler]
+    assert calls == []
 
 
 # --- Кнопка слева от поля ввода (F1) ---
@@ -317,8 +372,8 @@ async def test_first_menu_render_sends_keyboard_once(monkeypatch, enabled):
     assert len(_sent_reply_keyboards(bot)) == 1
     # Сначала клавиатура, последним сообщение с меню и его кнопками.
     calls = bot.send_message.await_args_list
-    assert len(calls) == 2 and calls[0].args[1] == 'Кнопки «Вызвать бота» и «В веб-кабинет» всегда над строкой ввода.'
-    assert 'bb_kb_sent:7' in fake.data and fake.data['bb_kb_sent:7'][1] == 30 * 24 * 3600
+    assert len(calls) == 2 and calls[0].args[1] == 'Кнопки «Бот», «Веб-кабинет» и «Mini-App» всегда над строкой ввода.'
+    assert 'bb_kb3_sent:7' in fake.data and fake.data['bb_kb3_sent:7'][1] == 30 * 24 * 3600
 
     bot.send_message.reset_mock()
     assert await main_menu.bb_send_main_menu(bot, 7, user, MagicMock()) is True
@@ -369,14 +424,14 @@ async def test_start_keyboard_marks_flag(monkeypatch, enabled):
     bot.send_message = AsyncMock()
     bot.set_chat_menu_button = AsyncMock()
     user = _menu_user()
-    fake.data['bb_kb_sent:7'] = (1, 1)
+    fake.data['bb_kb3_sent:7'] = (1, 1)
 
     await keyboard.maybe_send_bb_keyboard(bot, 7, user)
     assert len(_sent_reply_keyboards(bot)) == 1
 
-    del fake.data['bb_kb_sent:7']
+    del fake.data['bb_kb3_sent:7']
     await keyboard.maybe_send_bb_keyboard(bot, 7, user)
-    assert 'bb_kb_sent:7' in fake.data
+    assert 'bb_kb3_sent:7' in fake.data
     bot.send_message.reset_mock()
     await main_menu.bb_send_main_menu(bot, 7, user, MagicMock())
     assert _sent_reply_keyboards(bot) == []

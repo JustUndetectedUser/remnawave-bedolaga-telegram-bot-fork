@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.bb import browser_login as bb_browser_login
 from app.cabinet.auth.email_auth_gate import require_email_auth_enabled
 from app.cabinet.auth.registration_access import (
     evaluate_public_registration,
@@ -2029,6 +2030,11 @@ async def auto_login(
         )
 
     payload = get_token_payload(request.token, expected_type='auto_login')
+    # BlackBird: одноразовая ссылка «Веб-кабинет» из бота (app/bb/browser_login.py) — тот же путь входа
+    bb_browser_link = False
+    if not payload:
+        payload = await bb_browser_login.redeem_browser_login_token(request.token)
+        bb_browser_link = payload is not None
     if not payload:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -2062,7 +2068,8 @@ async def auto_login(
     # и получить токен, ведущий к этому user. Запрещаем такой path для админов
     # из ADMIN_IDS / ADMIN_EMAILS — пусть проходят полную Telegram WebApp /
     # password аутентификацию.
-    if is_user_admin_by_env(user).is_admin:
+    # BlackBird: ссылку из бота получает только сам владелец аккаунта в личном чате — её админам можно.
+    if not bb_browser_link and is_user_admin_by_env(user).is_admin:
         logger.warning(
             'Auto-login blocked for admin account — must use full auth flow',
             user_id=user.id,

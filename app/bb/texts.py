@@ -5,11 +5,17 @@ PRIVACY_URL = 'https://blackbirdnet.com/privacy'
 
 TEXTS = {
     'ru': {
-        'btn_bot': 'Вызвать бота',
-        'btn_cabinet': 'В веб-кабинет',
-        'keyboard_note': 'Кнопки «Вызвать бота» и «В веб-кабинет» всегда над строкой ввода.',
-        'cabinet_note': 'Веб-кабинет откроется уже с входом в ваш аккаунт.',
-        'cabinet_open': 'Открыть веб-кабинет',
+        # Кнопки над строкой ввода (app/bb/keyboard.py): меню в переписке, кабинет в браузере, Mini App
+        'btn_bot': 'Бот',
+        'btn_web': 'Веб-кабинет',
+        'btn_miniapp': 'Mini-App',
+        'keyboard_note': 'Кнопки «Бот», «Веб-кабинет» и «Mini-App» всегда над строкой ввода.',
+        'cabinet_note': 'Кабинет откроется прямо в Telegram, уже с входом в ваш аккаунт.',
+        'cabinet_open': 'Открыть Mini-App',
+        'web_note': (
+            'Кабинет откроется в браузере, уже с входом в ваш аккаунт. Ссылка одноразовая и действует {minutes} минут.'
+        ),
+        'web_open': 'Открыть в браузере',
         # Главное меню
         'btn_connect': '🔗 Подключить устройство',
         'btn_renew': '💳 Продлить или сменить тариф',
@@ -100,11 +106,14 @@ TEXTS = {
         'btn_apk': 'APK',
     },
     'en': {
-        'btn_bot': 'Open bot menu',
-        'btn_cabinet': 'To web account',
+        'btn_bot': 'Bot',
+        'btn_web': 'Web account',
+        'btn_miniapp': 'Mini App',
         'keyboard_note': 'The buttons are always above the message field.',
-        'cabinet_note': 'The web account opens already signed in.',
-        'cabinet_open': 'Open web account',
+        'cabinet_note': 'Your account opens right in Telegram, already signed in.',
+        'cabinet_open': 'Open Mini App',
+        'web_note': 'Your account opens in the browser, already signed in. The link works once, for {minutes} minutes.',
+        'web_open': 'Open in browser',
         # Main menu
         'btn_connect': '🔗 Connect a device',
         'btn_renew': '💳 Renew or change plan',
