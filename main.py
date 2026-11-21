@@ -363,6 +363,11 @@ async def main():
 
         await configure_chat_menu_button(bot)
 
+        # BlackBird: описание в пустом чате над кнопкой «Старт» (подсказка, что нажать)
+        from app.bb.description import configure_bb_description
+
+        await configure_bb_description(bot)
+
         monitoring_service.bot = bot
         grace_access_runtime.bot = bot
         maintenance_service.set_bot(bot)

@@ -83,7 +83,15 @@ async def handle_cancel(callback: types.CallbackQuery, state: FSMContext, db_use
 async def handle_unknown_message(
     message: types.Message,
     db_user: User | None = None,
+    db: AsyncSession | None = None,  # BlackBird
 ):
+    # BlackBird: при меню в переписке вместо «Не понимаю эту команду» три кнопки и меню, как на /start.
+    # Локальный импорт: app.bb.entry тянет хендлеры меню.
+    from app.bb.entry import on_any_message
+
+    if await on_any_message(message, db_user, db):
+        return
+
     texts = get_texts(db_user.language if db_user else 'ru')
 
     await message.answer(

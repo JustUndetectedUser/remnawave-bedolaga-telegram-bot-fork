@@ -1243,6 +1243,10 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     # BlackBird: offer_<код> (уникальный тариф промогруппы) не для Bedolaga: код ждёт в Redis, запись после регистрации
     if await bb_offers.stash_start_payload(message.from_user.id, msg_start_arg):
         msg_start_arg = None
+    # BlackBird: /start menu: ссылка на бота с сайта (blackbirdnet.com/bot). Параметр нужен, чтобы Telegram показал
+    # кнопку «Старт» и в чате, где уже есть сообщения. Дальше обычный /start, не реферальный код и не кампания.
+    if msg_start_arg == 'menu':
+        msg_start_arg = None
 
     if pending_start_payload and msg_start_arg and pending_start_payload != msg_start_arg:
         # Одновременно есть аргумент из сообщения и pending payload.
@@ -1275,6 +1279,9 @@ async def cmd_start(message: types.Message, state: FSMContext, db: AsyncSession,
     elif pending_start_payload:
         start_parameter = pending_start_payload
         logger.info('📦 START: Используем сохраненный payload', pending_start_payload=pending_start_payload)
+    # BlackBird: тот же /start menu, сохранённый до проверки подписки на канал
+    if start_parameter == 'menu':
+        start_parameter = None
 
     if state_needs_update:
         await state.set_data(data)

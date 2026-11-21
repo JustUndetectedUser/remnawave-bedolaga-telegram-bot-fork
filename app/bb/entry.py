@@ -15,9 +15,11 @@ from app.bb import (
     renew as bb_renew,
     tariffs as bb_tariffs,
 )
+from app.bb.keyboard import maybe_send_bb_keyboard
 from app.bb.rollout import chat_menu_enabled
 from app.bb.texts import TEXTS, bb_text
 from app.config import settings
+from app.database.models import UserStatus
 from app.handlers.menu import build_main_menu_keyboard
 from app.localization.texts import get_texts
 from app.utils.rich_menu import try_answer_rich_main_menu
@@ -99,6 +101,25 @@ async def on_web_button(message: types.Message, db_user=None) -> None:
     )
     note = bb_text(language, 'web_note').format(minutes=bb_browser_login.TTL_SECONDS // 60)
     await message.answer(note, reply_markup=markup, protect_content=True)
+
+
+async def on_any_message(message: types.Message, db_user=None, db: AsyncSession | None = None) -> bool:
+    """Сообщение, которое бот не понял (хук в начале app.handlers.common.handle_unknown_message).
+
+    Кто пишет боту вместо нажатия кнопок, скорее всего их не видит. Например, переписка началась не с /start: бот
+    написал первым после входа в кабинет через Telegram, и кнопки «Старт» в чате нет. Поэтому вместо «Не понимаю эту
+    команду» он получает то же, что на /start: три кнопки над строкой ввода (всегда, вернуть скрытые) и меню.
+    Сообщение человека не удаляется: это не нажатие кнопки.
+
+    False: меню переписки выключено, человек неизвестен или не активен, чат не личный, меню не ушло. Тогда отвечает
+    Bedolaga.
+    """
+    if not chat_menu_enabled(db_user) or db is None or message.chat.type != 'private':
+        return False
+    if getattr(db_user, 'status', None) != UserStatus.ACTIVE.value:
+        return False
+    await maybe_send_bb_keyboard(message.bot, message.chat.id, db_user)
+    return await bb_menu.bb_send_main_menu(message.bot, message.chat.id, db_user, db)
 
 
 def register_handlers(dp: Dispatcher) -> None:

@@ -10,6 +10,8 @@ TEXTS = {
         'btn_web': 'Веб-кабинет',
         'btn_miniapp': 'Mini-App',
         'keyboard_note': 'Кнопки «Бот», «Веб-кабинет» и «Mini-App» всегда над строкой ввода.',
+        # Описание бота в пустом чате над кнопкой Telegram (app/bb/description.py), до 512 символов
+        'bot_description': 'Нажмите кнопку внизу экрана, чтобы открыть меню: подписка, подключение, кабинет.',
         'cabinet_note': 'Кабинет откроется прямо в Telegram, уже с входом в ваш аккаунт.',
         'cabinet_open': 'Открыть Mini-App',
         'web_note': (
@@ -110,6 +112,7 @@ TEXTS = {
         'btn_web': 'Web account',
         'btn_miniapp': 'Mini App',
         'keyboard_note': 'The buttons are always above the message field.',
+        'bot_description': 'Tap the button at the bottom of the screen to open the menu: subscription, connection, account.',
         'cabinet_note': 'Your account opens right in Telegram, already signed in.',
         'cabinet_open': 'Open Mini App',
         'web_note': 'Your account opens in the browser, already signed in. The link works once, for {minutes} minutes.',
